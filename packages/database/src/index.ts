@@ -11,7 +11,10 @@ import type {
   ProjectSummary,
   SceneVariant,
   SceneUpdateInput,
+  ShareLink,
+  SharePermissions,
   Transform,
+  UpdateShareLinkInput,
   UploadPart,
   UploadSession,
   UploadSessionState,
@@ -76,6 +79,19 @@ interface MongoUploadSessionDocument {
   partSize: number;
   totalParts: number;
   parts: UploadPart[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface MongoShareLinkDocument {
+  _id: ObjectId;
+  projectId: ObjectId;
+  ownerFirebaseUid: string;
+  tokenHash: string;
+  enabled: boolean;
+  expiresAt: Date | null;
+  revokedAt: Date | null;
+  permissions: SharePermissions;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -164,12 +180,31 @@ export interface AssetRepository {
   ): Promise<AssetRecord | null>;
 }
 
+export interface NewShareLink {
+  projectId: string;
+  ownerFirebaseUid: string;
+  tokenHash: string;
+  expiresAt: string | null;
+  permissions: SharePermissions;
+}
+
+export interface ShareLinkRepository {
+  createShareLink(input: NewShareLink): Promise<ShareLink | null>;
+  listShareLinks(projectId: string): Promise<ShareLink[]>;
+  getShareLink(shareLinkId: string): Promise<ShareLink | null>;
+  getActiveShareLinkByTokenHash(tokenHash: string, now: Date): Promise<ShareLink | null>;
+  updateShareLink(shareLinkId: string, input: UpdateShareLinkInput): Promise<ShareLink | null>;
+  regenerateShareLink(shareLinkId: string, tokenHash: string): Promise<ShareLink | null>;
+  revokeShareLink(shareLinkId: string): Promise<ShareLink | null>;
+}
+
 export interface DatabaseRepositories {
   users: UserRepository;
   projects: ProjectRepository;
   scenes: SceneRepository;
   assets: AssetRepository;
   uploadSessions: UploadSessionRepository;
+  shares: ShareLinkRepository;
   ping(): Promise<void>;
   close(): Promise<void>;
 }
@@ -183,6 +218,7 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
         scenes: Collection<MongoSceneDocument>;
         assets: Collection<MongoAssetDocument>;
         uploadSessions: Collection<MongoUploadSessionDocument>;
+        shares: Collection<MongoShareLinkDocument>;
       }>
     | undefined;
 
@@ -195,6 +231,7 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
       const scenes = database.collection<MongoSceneDocument>('scenes');
       const assets = database.collection<MongoAssetDocument>('assets');
       const uploadSessions = database.collection<MongoUploadSessionDocument>('upload_sessions');
+      const shares = database.collection<MongoShareLinkDocument>('share_links');
       await Promise.all([
         users.createIndex({ firebaseUid: 1 }, { unique: true }),
         projects.createIndex({ ownerFirebaseUid: 1, archivedAt: 1, updatedAt: -1 }),
@@ -203,8 +240,11 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
         assets.createIndex({ ownerFirebaseUid: 1, projectId: 1 }),
         uploadSessions.createIndex({ assetId: 1 }, { unique: true }),
         uploadSessions.createIndex({ projectId: 1, ownerFirebaseUid: 1, state: 1 }),
+        shares.createIndex({ tokenHash: 1 }, { unique: true }),
+        shares.createIndex({ projectId: 1, createdAt: -1 }),
+        shares.createIndex({ enabled: 1, revokedAt: 1, expiresAt: 1 }),
       ]);
-      return { users, projects, scenes, assets, uploadSessions };
+      return { users, projects, scenes, assets, uploadSessions, shares };
     })();
     return collections;
   }
@@ -326,10 +366,11 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
         if (!objectId) {
           return false;
         }
-        const { projects, scenes } = await getCollections();
+        const { projects, scenes, shares } = await getCollections();
         const deleted = await projects.deleteOne({ _id: objectId });
         if (deleted.deletedCount === 1) {
           await scenes.deleteMany({ projectId: objectId });
+          await shares.deleteMany({ projectId: objectId });
           return true;
         }
         return false;
@@ -445,6 +486,96 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
           { returnDocument: 'after' },
         );
         return stored ? toAssetRecord(stored) : null;
+      },
+    },
+    shares: {
+      async createShareLink(input) {
+        const projectId = toObjectId(input.projectId);
+        if (!projectId) return null;
+        const { shares } = await getCollections();
+        const now = new Date();
+        const stored: MongoShareLinkDocument = {
+          _id: new ObjectId(),
+          projectId,
+          ownerFirebaseUid: input.ownerFirebaseUid,
+          tokenHash: input.tokenHash,
+          enabled: true,
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+          revokedAt: null,
+          permissions: input.permissions,
+          createdAt: now,
+          updatedAt: now,
+        };
+        await shares.insertOne(stored);
+        return toShareLink(stored);
+      },
+      async listShareLinks(projectId) {
+        const objectId = toObjectId(projectId);
+        if (!objectId) return [];
+        const { shares } = await getCollections();
+        const stored = await shares.find({ projectId: objectId }).sort({ createdAt: -1 }).toArray();
+        return stored.map(toShareLink);
+      },
+      async getShareLink(shareLinkId) {
+        const objectId = toObjectId(shareLinkId);
+        if (!objectId) return null;
+        const { shares } = await getCollections();
+        const stored = await shares.findOne({ _id: objectId });
+        return stored ? toShareLink(stored) : null;
+      },
+      async getActiveShareLinkByTokenHash(tokenHash, now) {
+        const { shares } = await getCollections();
+        const stored = await shares.findOne({
+          tokenHash,
+          enabled: true,
+          revokedAt: null,
+          $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
+        });
+        return stored ? toShareLink(stored) : null;
+      },
+      async updateShareLink(shareLinkId, input) {
+        const objectId = toObjectId(shareLinkId);
+        if (!objectId) return null;
+        const { shares } = await getCollections();
+        const update: Record<string, unknown> = { updatedAt: new Date() };
+        if (input.enabled !== undefined) update.enabled = input.enabled;
+        if (input.expiresAt !== undefined) {
+          update.expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
+        }
+        if (input.permissions !== undefined) {
+          const stored = await shares.findOne({ _id: objectId, revokedAt: null });
+          if (!stored) return null;
+          update.permissions = { ...stored.permissions, ...input.permissions };
+        }
+        const stored = await shares.findOneAndUpdate(
+          { _id: objectId, revokedAt: null },
+          { $set: update },
+          { returnDocument: 'after' },
+        );
+        return stored ? toShareLink(stored) : null;
+      },
+      async regenerateShareLink(shareLinkId, tokenHash) {
+        const objectId = toObjectId(shareLinkId);
+        if (!objectId) return null;
+        const { shares } = await getCollections();
+        const stored = await shares.findOneAndUpdate(
+          { _id: objectId, revokedAt: null },
+          { $set: { tokenHash, enabled: true, updatedAt: new Date() } },
+          { returnDocument: 'after' },
+        );
+        return stored ? toShareLink(stored) : null;
+      },
+      async revokeShareLink(shareLinkId) {
+        const objectId = toObjectId(shareLinkId);
+        if (!objectId) return null;
+        const now = new Date();
+        const { shares } = await getCollections();
+        const stored = await shares.findOneAndUpdate(
+          { _id: objectId, revokedAt: null },
+          { $set: { enabled: false, revokedAt: now, updatedAt: now } },
+          { returnDocument: 'after' },
+        );
+        return stored ? toShareLink(stored) : null;
       },
     },
     uploadSessions: {
@@ -612,6 +743,19 @@ function toUploadSession(document: MongoUploadSessionDocument): UploadSession {
     partSize: document.partSize,
     totalParts: document.totalParts,
     parts: [...document.parts].sort((left, right) => left.partNumber - right.partNumber),
+    createdAt: document.createdAt.toISOString(),
+    updatedAt: document.updatedAt.toISOString(),
+  };
+}
+
+function toShareLink(document: MongoShareLinkDocument): ShareLink {
+  return {
+    id: document._id.toHexString(),
+    projectId: document.projectId.toHexString(),
+    enabled: document.enabled,
+    expiresAt: document.expiresAt?.toISOString() ?? null,
+    revokedAt: document.revokedAt?.toISOString() ?? null,
+    permissions: document.permissions,
     createdAt: document.createdAt.toISOString(),
     updatedAt: document.updatedAt.toISOString(),
   };

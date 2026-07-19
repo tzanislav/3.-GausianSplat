@@ -26,6 +26,7 @@ const app = createApp({
   scenes: database.scenes,
   assets: database.assets,
   uploadSessions: database.uploadSessions,
+  shares: database.shares,
   storage: createS3AssetStorage(storageEnvironment),
 });
 

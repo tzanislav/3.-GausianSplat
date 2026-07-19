@@ -7,8 +7,12 @@ import type {
   DefaultCamera,
   MultipartPartUrlTicket,
   OwnerSceneManifest,
+  PublicAssetFormat,
+  PublicShareManifest,
   ProjectSummary,
   SceneVariant,
+  ShareLink,
+  SharePermissions,
   Transform,
   UploadSession,
   ViewerSettings,
@@ -41,6 +45,11 @@ const INITIAL_VIEWER_STATE: ViewerState = {
 };
 
 export function App() {
+  const shareMatch = window.location.pathname.match(/^\/share\/([^/]+)$/);
+  if (shareMatch) {
+    return <PublicShareViewer token={shareMatch[1]!} />;
+  }
+
   return (
     <AuthProvider>
       <Application />
@@ -60,6 +69,113 @@ function Application() {
     return <ProjectEditor projectId={editorMatch[1]!} />;
   }
   return <Home />;
+}
+
+function PublicShareViewer({ token }: { token: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const viewerRef = useRef<HybridViewer | null>(null);
+  const [manifest, setManifest] = useState<PublicShareManifest | null>(null);
+  const [message, setMessage] = useState('Loading shared projectâ€¦');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const viewer = new HybridViewer(canvas, {
+      mobile: window.matchMedia('(max-width: 767px)').matches,
+      onStateChange: (state) => setMessage(state.message ?? 'Loading shared projectâ€¦'),
+    });
+    // Public viewers are intentionally never allowed to attach transform controls.
+    viewer.selectAsset(undefined);
+    viewerRef.current = viewer;
+    return () => {
+      viewer.dispose();
+      viewerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        setError(null);
+        const response = await fetch(`/api/public/shares/${encodeURIComponent(token)}/manifest`, {
+          cache: 'no-store',
+          referrerPolicy: 'no-referrer',
+        });
+        if (!response.ok) {
+          throw new Error('This shared project is unavailable or its link has expired.');
+        }
+        const loaded = (await response.json()) as PublicShareManifest;
+        const viewer = viewerRef.current;
+        if (!active || !viewer) return;
+        viewer.clearAsset('environment');
+        viewer.clearAsset('building');
+        if (loaded.environment) {
+          const assetResponse = await fetch(loaded.environment.url, {
+            referrerPolicy: 'no-referrer',
+          });
+          if (!assetResponse.ok) throw new Error('The shared environment could not be loaded.');
+          await viewer.loadEnvironment(
+            new File(
+              [await assetResponse.blob()],
+              runtimeFilename('environment', loaded.environment.format),
+            ),
+            loaded.environmentTransform,
+          );
+        }
+        const building = loaded.variants[0];
+        if (building) {
+          const assetResponse = await fetch(building.asset.url, { referrerPolicy: 'no-referrer' });
+          if (!assetResponse.ok) throw new Error('The shared building could not be loaded.');
+          await viewer.loadBuilding(
+            new File(
+              [await assetResponse.blob()],
+              runtimeFilename('building', building.asset.format),
+            ),
+            building.transform,
+          );
+          viewer.setVisible('building', loaded.viewerSettings.buildingVisible && building.visible);
+        }
+        viewer.setVisible('environment', loaded.viewerSettings.environmentVisible);
+        if (loaded.defaultCamera) viewer.setCamera(loaded.defaultCamera);
+        document.title = `${loaded.project.name} â€” Gaussian Viewer`;
+        if (active) setManifest(loaded);
+      } catch (loadError) {
+        if (active) setError(messageFor(loadError));
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [token]);
+
+  return (
+    <main className="public-viewer">
+      <header className="public-viewer__header">
+        <div>
+          <p className="eyebrow">Shared project</p>
+          <h1>{manifest?.project.name ?? 'Gaussian Viewer'}</h1>
+        </div>
+        <p className="public-viewer__status" role="status">
+          {error ?? message}
+        </p>
+      </header>
+      {error ? (
+        <section className="public-viewer__error">
+          <h2>Shared project unavailable</h2>
+          <p>{error}</p>
+        </section>
+      ) : (
+        <section className="public-viewer__canvas">
+          <canvas ref={canvasRef} className="viewer-canvas" aria-label="Shared project scene" />
+          <p className="viewer-canvas-wrap__help">
+            Drag to orbit Â· scroll to zoom Â· right-drag to pan
+          </p>
+        </section>
+      )}
+    </main>
+  );
 }
 
 function Home() {
@@ -725,6 +841,7 @@ function ProjectEditor({ projectId }: { projectId: string }) {
           projectId={projectId}
           readyAsset={asset?.state === 'READY' ? asset : null}
         />
+        <ShareLinks projectId={projectId} />
         <p>
           Upload GLB test assets up to 100 MB, or resumable multipart PLY/SPZ environments above
           that limit.
@@ -796,6 +913,298 @@ function ProjectEditor({ projectId }: { projectId: string }) {
         </section>
       </main>
     </ProjectAccess>
+  );
+}
+
+function ShareLinks({ projectId }: { projectId: string }) {
+  const auth = useAuth();
+  const [links, setLinks] = useState<ShareLink[]>([]);
+  const [expiry, setExpiry] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [latestUrl, setLatestUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (auth.status !== 'authenticated') return;
+    void loadLinks();
+
+    async function loadLinks() {
+      try {
+        setIsLoading(true);
+        const response = await auth.authenticatedFetch(`/api/projects/${projectId}/shares`);
+        if (!response.ok) throw new Error('Share links could not be loaded.');
+        setLinks((await response.json()) as ShareLink[]);
+      } catch (loadError) {
+        setError(messageFor(loadError));
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  }, [auth, projectId]);
+
+  async function createLink(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      setIsSaving(true);
+      setError(null);
+      const response = await auth.authenticatedFetch(`/api/projects/${projectId}/shares`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ expiresAt: expiry ? new Date(expiry).toISOString() : null }),
+      });
+      if (!response.ok)
+        throw new Error((await response.json()).error ?? 'Share link could not be created.');
+      const created = (await response.json()) as { link: ShareLink; token: string };
+      setLinks((current) => [created.link, ...current]);
+      setLatestUrl(shareUrl(created.token));
+      setExpiry('');
+    } catch (createError) {
+      setError(messageFor(createError));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function updateLink(
+    link: ShareLink,
+    update: Partial<Pick<ShareLink, 'enabled' | 'expiresAt' | 'permissions'>>,
+  ) {
+    try {
+      setIsSaving(true);
+      setError(null);
+      const response = await auth.authenticatedFetch(
+        `/api/projects/${projectId}/shares/${link.id}`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(update),
+        },
+      );
+      if (!response.ok)
+        throw new Error((await response.json()).error ?? 'Share link could not be updated.');
+      const updated = (await response.json()) as ShareLink;
+      setLinks((current) =>
+        current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
+      );
+    } catch (updateError) {
+      setError(messageFor(updateError));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function regenerateLink(link: ShareLink) {
+    if (!window.confirm('Regenerate this link? Anyone using the old address will lose access.'))
+      return;
+    try {
+      setIsSaving(true);
+      setError(null);
+      const response = await auth.authenticatedFetch(
+        `/api/projects/${projectId}/shares/${link.id}/regenerate`,
+        { method: 'POST' },
+      );
+      if (!response.ok)
+        throw new Error((await response.json()).error ?? 'Share link could not be regenerated.');
+      const updated = (await response.json()) as { link: ShareLink; token: string };
+      setLinks((current) =>
+        current.map((candidate) => (candidate.id === updated.link.id ? updated.link : candidate)),
+      );
+      setLatestUrl(shareUrl(updated.token));
+    } catch (regenerateError) {
+      setError(messageFor(regenerateError));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function revokeLink(link: ShareLink) {
+    if (!window.confirm('Revoke this link permanently? It cannot be re-enabled.')) return;
+    try {
+      setIsSaving(true);
+      setError(null);
+      const response = await auth.authenticatedFetch(
+        `/api/projects/${projectId}/shares/${link.id}`,
+        {
+          method: 'DELETE',
+        },
+      );
+      if (!response.ok)
+        throw new Error((await response.json()).error ?? 'Share link could not be revoked.');
+      const revoked = (await response.json()) as ShareLink;
+      setLinks((current) =>
+        current.map((candidate) => (candidate.id === revoked.id ? revoked : candidate)),
+      );
+    } catch (revokeError) {
+      setError(messageFor(revokeError));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <section className="share-links" aria-label="Anonymous sharing">
+      <div>
+        <p className="eyebrow">Anonymous sharing</p>
+        <h2>Share read-only access</h2>
+        <p className="panel__hint">
+          Links grant read-only access. Revoke stops future manifest requests; already-issued asset
+          URLs expire within five minutes.
+        </p>
+      </div>
+      <form className="share-links__create" onSubmit={(event) => void createLink(event)}>
+        <label>
+          Optional expiry
+          <input
+            type="datetime-local"
+            value={expiry}
+            onChange={(event) => setExpiry(event.target.value)}
+          />
+        </label>
+        <button className="auth-button" type="submit" disabled={isSaving}>
+          Create share link
+        </button>
+      </form>
+      {latestUrl ? (
+        <div className="share-links__token">
+          <strong>Copy this new link now.</strong>
+          <code>{latestUrl}</code>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => void navigator.clipboard.writeText(latestUrl)}
+          >
+            Copy link
+          </button>
+        </div>
+      ) : null}
+      {error ? <p className="project-error">{error}</p> : null}
+      {isLoading ? <p className="panel__hint">Loading share linksâ€¦</p> : null}
+      <div className="share-links__list">
+        {links.map((link) => (
+          <ShareLinkCard
+            key={link.id}
+            link={link}
+            disabled={isSaving}
+            onUpdate={updateLink}
+            onRegenerate={regenerateLink}
+            onRevoke={revokeLink}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ShareLinkCard({
+  link,
+  disabled,
+  onUpdate,
+  onRegenerate,
+  onRevoke,
+}: {
+  link: ShareLink;
+  disabled: boolean;
+  onUpdate: (
+    link: ShareLink,
+    update: Partial<Pick<ShareLink, 'enabled' | 'expiresAt' | 'permissions'>>,
+  ) => Promise<void>;
+  onRegenerate: (link: ShareLink) => Promise<void>;
+  onRevoke: (link: ShareLink) => Promise<void>;
+}) {
+  const isRevoked = link.revokedAt !== null;
+  return (
+    <article className="share-link-card">
+      <div>
+        <strong>{isRevoked ? 'Revoked' : link.enabled ? 'Enabled' : 'Disabled'}</strong>
+        <p className="panel__hint">
+          Created {formatDate(link.createdAt)}
+          {link.expiresAt ? ` Â· expires ${formatDate(link.expiresAt)}` : ' Â· no expiry'}
+        </p>
+      </div>
+      {!isRevoked ? (
+        <>
+          <Toggle
+            label="Enabled"
+            checked={link.enabled}
+            disabled={disabled}
+            onChange={(enabled) => void onUpdate(link, { enabled })}
+          />
+          <fieldset className="share-link-card__permissions">
+            <legend>Presentation permissions</legend>
+            <SharePermissionToggle
+              label="Allow variant switching"
+              name="allowVariantSwitching"
+              permissions={link.permissions}
+              disabled={disabled}
+              onChange={(permissions) => void onUpdate(link, { permissions })}
+            />
+            <SharePermissionToggle
+              label="Show annotations"
+              name="showAnnotations"
+              permissions={link.permissions}
+              disabled={disabled}
+              onChange={(permissions) => void onUpdate(link, { permissions })}
+            />
+            <SharePermissionToggle
+              label="Show project description"
+              name="showProjectDescription"
+              permissions={link.permissions}
+              disabled={disabled}
+              onChange={(permissions) => void onUpdate(link, { permissions })}
+            />
+            <SharePermissionToggle
+              label="Show technical information"
+              name="showTechnicalInformation"
+              permissions={link.permissions}
+              disabled={disabled}
+              onChange={(permissions) => void onUpdate(link, { permissions })}
+            />
+          </fieldset>
+          <div className="auth-page__actions">
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={disabled}
+              onClick={() => void onRegenerate(link)}
+            >
+              Regenerate
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={disabled}
+              onClick={() => void onRevoke(link)}
+            >
+              Revoke
+            </button>
+          </div>
+        </>
+      ) : null}
+    </article>
+  );
+}
+
+function SharePermissionToggle({
+  label,
+  name,
+  permissions,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  name: keyof SharePermissions;
+  permissions: SharePermissions;
+  disabled: boolean;
+  onChange: (permissions: SharePermissions) => void;
+}) {
+  return (
+    <Toggle
+      label={label}
+      checked={permissions[name]}
+      disabled={disabled}
+      onChange={(checked) => onChange({ ...permissions, [name]: checked })}
+    />
   );
 }
 
@@ -1159,7 +1568,7 @@ function PersistentProjectViewer({
     if (!manifestRef.current || conflictRef.current) return;
     if (asset.kind === 'ENVIRONMENT') {
       await enqueueSceneUpdate({ environmentAssetId: asset.id });
-    } else {
+    } else if (asset.kind === 'BUILDING') {
       await enqueueSceneUpdate({
         variants: [
           {
@@ -1958,4 +2367,12 @@ function formatAssetStatus(status: ProjectSummary['assetStatus']): string {
 
 function formatShareStatus(status: ProjectSummary['shareStatus']): string {
   return status === 'NOT_SHARED' ? 'Not shared' : status;
+}
+
+function runtimeFilename(kind: 'environment' | 'building', format: PublicAssetFormat): string {
+  return `${kind}.${format.toLowerCase()}`;
+}
+
+function shareUrl(token: string): string {
+  return `${window.location.origin}/share/${token}`;
 }

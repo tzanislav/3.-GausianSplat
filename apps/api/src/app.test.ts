@@ -1,14 +1,16 @@
 import type { Server } from 'node:http';
 import type { TokenVerifier } from '@gaussian-viewer/auth';
-import type { AssetRecord, AssetUploadTicket } from '@gaussian-viewer/contracts';
+import type { AssetRecord, AssetUploadTicket, ShareLink } from '@gaussian-viewer/contracts';
 import type {
   AssetRepository,
   ProjectRepository,
   SceneRecord,
   SceneRepository,
+  ShareLinkRepository,
   UserRepository,
 } from '@gaussian-viewer/database';
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { createHash } from 'node:crypto';
 import { createApp } from './app.js';
 import type { AssetStorage } from './storage.js';
 
@@ -630,6 +632,291 @@ test('scene manifests resolve private environment keys and scene updates reject 
   } finally {
     await new Promise<void>((resolve, reject) => {
       manifestServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+test('anonymous share manifests are token-only, sanitized and immediately respect disablement', async () => {
+  const verifier: TokenVerifier = {
+    async verifyIdToken(token) {
+      if (token !== 'owner-token') throw new Error('invalid token');
+      return {
+        firebaseUid: 'owner-id',
+        email: 'owner@example.com',
+        displayName: 'Owner',
+        photoUrl: null,
+      };
+    },
+  };
+  const users: UserRepository = {
+    async upsertFirebaseUser(user) {
+      return {
+        id: user.firebaseUid,
+        ...user,
+        createdAt: '2026-07-18T00:00:00.000Z',
+        updatedAt: '2026-07-18T00:00:00.000Z',
+      };
+    },
+  };
+  const projects: ProjectRepository = {
+    async listOwnedProjects() {
+      return [];
+    },
+    async createProject(_ownerFirebaseUid, input) {
+      return projectSummary('owner-project', input.name);
+    },
+    async getProject(projectId) {
+      return projectId === 'owner-project'
+        ? { ...projectSummary(projectId, 'Presentation project'), ownerFirebaseUid: 'owner-id' }
+        : null;
+    },
+    async updateProject() {
+      return null;
+    },
+    async archiveProject() {
+      return null;
+    },
+    async deleteProject() {
+      return true;
+    },
+  };
+  const scene: SceneRecord = {
+    id: 'private-scene-id',
+    projectId: 'owner-project',
+    ownerFirebaseUid: 'owner-id',
+    revision: 7,
+    environmentAssetId: 'environment-1',
+    environmentTransform: {
+      position: [0, 0, 0],
+      quaternion: [0, 0, 0, 1],
+      scale: [1, 1, 1],
+    },
+    variants: [
+      {
+        id: 'building-1',
+        assetId: 'building-1',
+        name: 'Approved design',
+        transform: {
+          position: [1, 0, 0],
+          quaternion: [0, 0, 0, 1],
+          scale: [1, 1, 1],
+        },
+        visible: true,
+        displayOrder: 0,
+      },
+    ],
+    viewerSettings: { schemaVersion: 1, environmentVisible: true, buildingVisible: true },
+    defaultCamera: { position: [3, 2, 3], target: [0, 0, 0], fov: 55 },
+    createdAt: '2026-07-18T00:00:00.000Z',
+    updatedAt: '2026-07-18T00:00:00.000Z',
+  };
+  const scenes: SceneRepository = {
+    async getScene(projectId) {
+      return projectId === scene.projectId ? scene : null;
+    },
+    async updateScene() {
+      return null;
+    },
+  };
+  const assets: AssetRepository = {
+    async createAsset() {
+      return null;
+    },
+    async setAssetOriginalKey() {
+      return false;
+    },
+    async getAsset(assetId) {
+      const assetsById: Record<
+        string,
+        AssetRecord & { ownerFirebaseUid: string; originalKey: string }
+      > = {
+        'environment-1': {
+          id: 'environment-1',
+          projectId: 'owner-project',
+          kind: 'ENVIRONMENT',
+          state: 'READY',
+          filename: 'private-site.spz',
+          contentType: 'application/octet-stream',
+          size: 128,
+          checksumSha256: null,
+          failureReason: null,
+          createdAt: '2026-07-18T00:00:00.000Z',
+          updatedAt: '2026-07-18T00:00:00.000Z',
+          deletedAt: null,
+          ownerFirebaseUid: 'owner-id',
+          originalKey: 'projects/owner-project/assets/environment-1/original/private-site.spz',
+        },
+        'building-1': {
+          id: 'building-1',
+          projectId: 'owner-project',
+          kind: 'BUILDING',
+          state: 'READY',
+          filename: 'private-building.glb',
+          contentType: 'model/gltf-binary',
+          size: 128,
+          checksumSha256: null,
+          failureReason: null,
+          createdAt: '2026-07-18T00:00:00.000Z',
+          updatedAt: '2026-07-18T00:00:00.000Z',
+          deletedAt: null,
+          ownerFirebaseUid: 'owner-id',
+          originalKey: 'projects/owner-project/assets/building-1/original/private-building.glb',
+        },
+      };
+      return assetsById[assetId] ?? null;
+    },
+    async updateAssetState() {
+      return null;
+    },
+  };
+  let links: Array<ShareLink & { tokenHash: string }> = [];
+  const shares: ShareLinkRepository = {
+    async createShareLink(input) {
+      const link: ShareLink & { tokenHash: string } = {
+        id: `share-${links.length + 1}`,
+        projectId: input.projectId,
+        enabled: true,
+        expiresAt: input.expiresAt,
+        revokedAt: null,
+        permissions: input.permissions,
+        createdAt: '2026-07-18T00:00:00.000Z',
+        updatedAt: '2026-07-18T00:00:00.000Z',
+        tokenHash: input.tokenHash,
+      };
+      links = [link, ...links];
+      return link;
+    },
+    async listShareLinks(projectId) {
+      return links.filter((link) => link.projectId === projectId);
+    },
+    async getShareLink(shareLinkId) {
+      return links.find((link) => link.id === shareLinkId) ?? null;
+    },
+    async getActiveShareLinkByTokenHash(tokenHash, now) {
+      return (
+        links.find(
+          (link) =>
+            link.tokenHash === tokenHash &&
+            link.enabled &&
+            link.revokedAt === null &&
+            (!link.expiresAt || new Date(link.expiresAt) > now),
+        ) ?? null
+      );
+    },
+    async updateShareLink(shareLinkId, update) {
+      const index = links.findIndex((link) => link.id === shareLinkId && link.revokedAt === null);
+      if (index < 0) return null;
+      const existing = links[index]!;
+      const updated = {
+        ...existing,
+        ...update,
+        permissions: { ...existing.permissions, ...update.permissions },
+      };
+      links[index] = updated;
+      return updated;
+    },
+    async regenerateShareLink(shareLinkId, tokenHash) {
+      const link = links.find(
+        (candidate) => candidate.id === shareLinkId && candidate.revokedAt === null,
+      );
+      if (!link) return null;
+      link.tokenHash = tokenHash;
+      link.enabled = true;
+      return link;
+    },
+    async revokeShareLink(shareLinkId) {
+      const link = links.find(
+        (candidate) => candidate.id === shareLinkId && candidate.revokedAt === null,
+      );
+      if (!link) return null;
+      link.enabled = false;
+      link.revokedAt = '2026-07-18T01:00:00.000Z';
+      return link;
+    },
+  };
+  const storage: AssetStorage = {
+    async createUploadUrl() {
+      return 'https://storage.example/upload';
+    },
+    async createDownloadUrl() {
+      return 'https://storage.example/temporary-download';
+    },
+    async getObjectMetadata() {
+      return { contentLength: 128, checksumSha256: undefined };
+    },
+    async getObjectHeader() {
+      return new Uint8Array();
+    },
+    async createMultipartUpload() {
+      return 'upload-id';
+    },
+    async createMultipartPartUrl() {
+      return 'https://storage.example/upload-part';
+    },
+    async completeMultipartUpload() {},
+    async abortMultipartUpload() {},
+  };
+  const shareServer = createApp({
+    tokenVerifier: verifier,
+    users,
+    projects,
+    scenes,
+    assets,
+    shares,
+    storage,
+  }).listen(0);
+  await new Promise<void>((resolve) => shareServer.once('listening', resolve));
+  const address = shareServer.address();
+  if (!address || typeof address === 'string')
+    throw new Error('Test server did not expose a TCP address.');
+  const shareOrigin = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const unauthenticatedMutation = await fetch(`${shareOrigin}/projects/owner-project/shares`, {
+      method: 'POST',
+    });
+    expect(unauthenticatedMutation.status).toBe(401);
+
+    const created = await fetch(`${shareOrigin}/projects/owner-project/shares`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer owner-token', 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(created.status).toBe(201);
+    const createdBody = (await created.json()) as { link: ShareLink; token: string };
+    expect(createdBody.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(links[0]?.tokenHash).toBe(createHash('sha256').update(createdBody.token).digest('hex'));
+
+    const publicManifest = await fetch(
+      `${shareOrigin}/public/shares/${createdBody.token}/manifest`,
+    );
+    expect(publicManifest.status).toBe(200);
+    expect(publicManifest.headers.get('referrer-policy')).toBe('no-referrer');
+    const manifest = (await publicManifest.json()) as Record<string, unknown>;
+    expect(manifest).toMatchObject({
+      project: { name: 'Presentation project' },
+      environment: { format: 'SPZ' },
+      variants: [{ name: 'Approved design', asset: { format: 'GLB' } }],
+    });
+    expect(manifest).not.toHaveProperty('projectId');
+    expect(JSON.stringify(manifest)).not.toContain('owner-id');
+    expect(JSON.stringify(manifest)).not.toContain('private-site.spz');
+    expect(JSON.stringify(manifest)).not.toContain('private-building.glb');
+
+    const disabled = await fetch(
+      `${shareOrigin}/projects/owner-project/shares/${createdBody.link.id}`,
+      {
+        method: 'PATCH',
+        headers: { authorization: 'Bearer owner-token', 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: false }),
+      },
+    );
+    expect(disabled.status).toBe(200);
+    const afterDisable = await fetch(`${shareOrigin}/public/shares/${createdBody.token}/manifest`);
+    expect(afterDisable.status).toBe(404);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      shareServer.close((error) => (error ? reject(error) : resolve()));
     });
   }
 });

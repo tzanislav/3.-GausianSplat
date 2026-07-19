@@ -1,5 +1,6 @@
 import type { TokenVerifier } from '@gaussian-viewer/auth';
 import {
+  CreateShareLinkInputSchema,
   CreateAssetUploadInputSchema,
   CreateMultipartUploadInputSchema,
   MultipartPartUrlInputSchema,
@@ -7,9 +8,12 @@ import {
   CreateProjectInputSchema,
   ProjectSettingsInputSchema,
   RecordMultipartPartInputSchema,
+  UpdateShareLinkInputSchema,
   type AssetKind,
   type AssetRecord,
   type FirebaseUser,
+  type PublicAssetFormat,
+  type SharePermissions,
   type UploadSession,
 } from '@gaussian-viewer/contracts';
 import type {
@@ -17,10 +21,18 @@ import type {
   ProjectRepository,
   SceneRepository,
   SceneRecord,
+  ShareLinkRepository,
   UploadSessionRepository,
   UserRepository,
 } from '@gaussian-viewer/database';
-import express, { type Express, type RequestHandler, type Response } from 'express';
+import { createHash, randomBytes } from 'node:crypto';
+import express, {
+  type Express,
+  type NextFunction,
+  type Request,
+  type RequestHandler,
+  type Response,
+} from 'express';
 import { assetStorageTimings, type AssetStorage } from './storage.js';
 
 const MAX_DIRECT_UPLOAD_BYTES = 100 * 1024 * 1024;
@@ -34,6 +46,7 @@ export interface AppDependencies {
   scenes?: SceneRepository;
   assets?: AssetRepository;
   uploadSessions?: UploadSessionRepository;
+  shares?: ShareLinkRepository;
   storage?: AssetStorage;
 }
 
@@ -43,6 +56,50 @@ export function createApp(dependencies: AppDependencies = {}): Express {
 
   app.get('/health', (_request, response) => {
     response.status(200).json({ status: 'ok' });
+  });
+
+  app.get('/public/shares/:token/manifest', async (request, response, next) => {
+    try {
+      const token = projectIdFrom(request.params.token);
+      if (!isShareToken(token)) {
+        response.status(404).json({ error: 'Share link not found.' });
+        return;
+      }
+      const shares = requireShares(dependencies, response);
+      if (!shares) return;
+      const projects = requireProjects(dependencies, response);
+      if (!projects) return;
+      const scenes = requireScenes(dependencies, response);
+      if (!scenes) return;
+      const assets = requireAssets(dependencies, response);
+      if (!assets) return;
+      const storage = requireStorage(dependencies, response);
+      if (!storage) return;
+
+      const link = await shares.getActiveShareLinkByTokenHash(hashShareToken(token), new Date());
+      if (!link) {
+        response.status(404).json({ error: 'Share link not found.' });
+        return;
+      }
+      const [project, scene] = await Promise.all([
+        projects.getProject(link.projectId),
+        scenes.getScene(link.projectId),
+      ]);
+      if (!project || !scene) {
+        response.status(404).json({ error: 'Share link not found.' });
+        return;
+      }
+      response.set({
+        'cache-control': 'no-store',
+        'referrer-policy': 'no-referrer',
+        'x-robots-tag': 'noindex, nofollow, noarchive',
+      });
+      response
+        .status(200)
+        .json(await toPublicManifest(project.name, scene, link.permissions, assets, storage));
+    } catch (error) {
+      next(error);
+    }
   });
 
   const requireAuthentication: RequestHandler = async (request, response, next) => {
@@ -215,6 +272,165 @@ export function createApp(dependencies: AppDependencies = {}): Express {
           return;
         }
         response.status(200).json(await toOwnerManifest(scene, assets, storage));
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.get('/projects/:projectId/shares', requireAuthentication, async (request, response, next) => {
+    try {
+      const project = await getOwnedProject(
+        dependencies,
+        response,
+        projectIdFrom(request.params.projectId),
+      );
+      const shares = requireShares(dependencies, response);
+      if (!project || !shares) return;
+      response.status(200).json(await shares.listShareLinks(project.id));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post(
+    '/projects/:projectId/shares',
+    requireAuthentication,
+    async (request, response, next) => {
+      try {
+        const project = await getOwnedProject(
+          dependencies,
+          response,
+          projectIdFrom(request.params.projectId),
+        );
+        const input = CreateShareLinkInputSchema.safeParse(request.body);
+        const shares = requireShares(dependencies, response);
+        if (!project || !shares || !input.success) {
+          if (project && !input.success)
+            response.status(400).json({ error: 'Share link settings are invalid.' });
+          return;
+        }
+        if (input.data.expiresAt && new Date(input.data.expiresAt) <= new Date()) {
+          response.status(400).json({ error: 'Share link expiry must be in the future.' });
+          return;
+        }
+        const token = createShareToken();
+        const firebaseUser = response.locals.firebaseUser as FirebaseUser;
+        const link = await shares.createShareLink({
+          projectId: project.id,
+          ownerFirebaseUid: firebaseUser.firebaseUid,
+          tokenHash: hashShareToken(token),
+          expiresAt: input.data.expiresAt ?? null,
+          permissions: { ...defaultSharePermissions(), ...input.data.permissions },
+        });
+        if (!link) {
+          response.status(409).json({ error: 'The share link could not be created.' });
+          return;
+        }
+        response.status(201).json({ link, token });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.patch(
+    '/projects/:projectId/shares/:shareLinkId',
+    requireAuthentication,
+    async (request, response, next) => {
+      try {
+        const project = await getOwnedProject(
+          dependencies,
+          response,
+          projectIdFrom(request.params.projectId),
+        );
+        const input = UpdateShareLinkInputSchema.safeParse(request.body);
+        const shares = requireShares(dependencies, response);
+        if (!project || !shares || !input.success) {
+          if (project && !input.success)
+            response.status(400).json({ error: 'Share link settings are invalid.' });
+          return;
+        }
+        if (input.data.expiresAt && new Date(input.data.expiresAt) <= new Date()) {
+          response.status(400).json({ error: 'Share link expiry must be in the future.' });
+          return;
+        }
+        const existing = await getOwnedShareLink(
+          shares,
+          response,
+          project.id,
+          projectIdFrom(request.params.shareLinkId),
+        );
+        if (!existing) return;
+        const updated = await shares.updateShareLink(existing.id, input.data);
+        if (!updated) {
+          response.status(409).json({ error: 'The share link can no longer be changed.' });
+          return;
+        }
+        response.status(200).json(updated);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.post(
+    '/projects/:projectId/shares/:shareLinkId/regenerate',
+    requireAuthentication,
+    async (request, response, next) => {
+      try {
+        const project = await getOwnedProject(
+          dependencies,
+          response,
+          projectIdFrom(request.params.projectId),
+        );
+        const shares = requireShares(dependencies, response);
+        if (!project || !shares) return;
+        const existing = await getOwnedShareLink(
+          shares,
+          response,
+          project.id,
+          projectIdFrom(request.params.shareLinkId),
+        );
+        if (!existing) return;
+        const token = createShareToken();
+        const updated = await shares.regenerateShareLink(existing.id, hashShareToken(token));
+        if (!updated) {
+          response.status(409).json({ error: 'The share link can no longer be regenerated.' });
+          return;
+        }
+        response.status(200).json({ link: updated, token });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.delete(
+    '/projects/:projectId/shares/:shareLinkId',
+    requireAuthentication,
+    async (request, response, next) => {
+      try {
+        const project = await getOwnedProject(
+          dependencies,
+          response,
+          projectIdFrom(request.params.projectId),
+        );
+        const shares = requireShares(dependencies, response);
+        if (!project || !shares) return;
+        const existing = await getOwnedShareLink(
+          shares,
+          response,
+          project.id,
+          projectIdFrom(request.params.shareLinkId),
+        );
+        if (!existing) return;
+        const revoked = await shares.revokeShareLink(existing.id);
+        if (!revoked) {
+          response.status(409).json({ error: 'The share link has already been revoked.' });
+          return;
+        }
+        response.status(200).json(revoked);
       } catch (error) {
         next(error);
       }
@@ -826,6 +1042,18 @@ export function createApp(dependencies: AppDependencies = {}): Express {
     },
   );
 
+  app.use((error: unknown, request: Request, response: Response, _next: NextFunction) => {
+    void _next;
+    // Never include request URLs here: a public share URL contains its bearer token.
+    if (request.path.startsWith('/public/shares/')) {
+      console.error('Public share manifest request failed.');
+      response.status(500).json({ error: 'The shared project could not be loaded.' });
+      return;
+    }
+    console.error(error instanceof Error ? error.message : 'API request failed.');
+    response.status(500).json({ error: 'The request could not be completed.' });
+  });
+
   return app;
 }
 
@@ -882,6 +1110,15 @@ function requireUploadSessions(
   return undefined;
 }
 
+function requireShares(
+  dependencies: AppDependencies,
+  response: Response,
+): ShareLinkRepository | undefined {
+  if (dependencies.shares) return dependencies.shares;
+  response.status(503).json({ error: 'Sharing is not configured.' });
+  return undefined;
+}
+
 async function getOwnedProject(
   dependencies: AppDependencies,
   response: Response,
@@ -929,6 +1166,20 @@ async function getOwnedAsset(
     return undefined;
   }
   return asset;
+}
+
+async function getOwnedShareLink(
+  shares: ShareLinkRepository,
+  response: Response,
+  projectId: string,
+  shareLinkId: string,
+) {
+  const link = await shares.getShareLink(shareLinkId);
+  if (!link || link.projectId !== projectId) {
+    response.status(404).json({ error: 'Share link not found.' });
+    return undefined;
+  }
+  return link;
 }
 
 async function getOwnedUploadSession(
@@ -1015,6 +1266,80 @@ async function toOwnerManifest(scene: SceneRecord, assets: AssetRepository, stor
     defaultCamera: scene.defaultCamera,
     annotations: [],
   };
+}
+
+async function toPublicManifest(
+  projectName: string,
+  scene: SceneRecord,
+  permissions: SharePermissions,
+  assets: AssetRepository,
+  storage: AssetStorage,
+) {
+  let environment;
+  if (scene.environmentAssetId) {
+    const asset = await assets.getAsset(scene.environmentAssetId);
+    if (asset?.state === 'READY' && asset.kind === 'ENVIRONMENT') {
+      environment = {
+        url: await storage.createDownloadUrl(asset.originalKey),
+        format: publicAssetFormat(asset.filename),
+      };
+    }
+  }
+  const variants = await Promise.all(
+    scene.variants.map(async (variant) => {
+      const asset = await assets.getAsset(variant.assetId);
+      if (asset?.state !== 'READY' || asset.kind !== 'BUILDING') return undefined;
+      return {
+        name: variant.name,
+        transform: variant.transform,
+        visible: variant.visible,
+        displayOrder: variant.displayOrder,
+        asset: {
+          url: await storage.createDownloadUrl(asset.originalKey),
+          format: publicAssetFormat(asset.filename),
+        },
+      };
+    }),
+  );
+  return {
+    project: { name: projectName },
+    permissions,
+    environment,
+    environmentTransform: scene.environmentTransform,
+    variants: variants.filter((variant) => variant !== undefined),
+    viewerSettings: scene.viewerSettings,
+    defaultCamera: scene.defaultCamera,
+    // Phase 11 owns annotation persistence; no owner-only values can leak before then.
+    annotations: [],
+  };
+}
+
+function createShareToken(): string {
+  return randomBytes(32).toString('base64url');
+}
+
+function hashShareToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function isShareToken(token: string): boolean {
+  return /^[A-Za-z0-9_-]{43}$/.test(token);
+}
+
+function defaultSharePermissions(): SharePermissions {
+  return {
+    allowVariantSwitching: true,
+    showAnnotations: true,
+    showProjectDescription: true,
+    showTechnicalInformation: false,
+  };
+}
+
+function publicAssetFormat(filename: string): PublicAssetFormat {
+  const extension = extensionOf(filename);
+  if (extension === '.ply') return 'PLY';
+  if (extension === '.spz') return 'SPZ';
+  return 'GLB';
 }
 
 function describeMultipartAsset(filename: string) {

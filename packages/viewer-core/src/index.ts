@@ -2,16 +2,19 @@ import type { DefaultCamera, Transform } from '@gaussian-viewer/contracts';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
 import {
   AmbientLight,
+  BackSide,
   Color,
   DirectionalLight,
   Euler,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   PlaneGeometry,
   PerspectiveCamera,
   Quaternion,
   Scene,
   SRGBColorSpace,
+  SphereGeometry,
   Texture,
   WebGLRenderer,
   type Material,
@@ -165,12 +168,14 @@ export class HybridViewer {
   private readonly spark: SparkRenderer;
   private readonly transformControls: ThreeTransformControls;
   private readonly transformControlsHelper: Object3D;
+  private readonly backgroundColor = new Color('#10151c');
   private readonly onStateChange?: (state: ViewerState) => void;
   private readonly onTransformStart?: HybridViewerOptions['onTransformStart'];
   private readonly onTransformChange?: HybridViewerOptions['onTransformChange'];
   private splat?: SplatMesh;
   private building?: Object3D;
   private proxyGround?: Mesh;
+  private readonly testSphere: Mesh<SphereGeometry, MeshBasicMaterial>;
   private selectedKind?: AssetKind;
   private disposed = false;
 
@@ -189,7 +194,7 @@ export class HybridViewer {
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.qualityProfile.pixelRatioLimit));
 
-    this.scene.background = new Color('#10151c');
+    this.scene.background = this.backgroundColor;
     this.camera.position.set(6, 4, 6);
 
     this.controls = new OrbitControls(this.camera, canvas);
@@ -220,6 +225,13 @@ export class HybridViewer {
     const sun = new DirectionalLight(0xffffff, 2.5);
     sun.position.set(8, 12, 5);
     this.scene.add(sun);
+
+    this.testSphere = new Mesh(
+      new SphereGeometry(10, 32, 16),
+      new MeshBasicMaterial({ color: '#6f89a6', side: BackSide }),
+    );
+    this.testSphere.name = 'Test sphere';
+    this.scene.add(this.testSphere);
 
     this.spark = new SparkRenderer({
       renderer: this.renderer,
@@ -400,6 +412,9 @@ export class HybridViewer {
     this.removeSplat();
     this.removeBuilding();
     this.removeProxyGround();
+    this.scene.remove(this.testSphere);
+    this.testSphere.geometry.dispose();
+    this.testSphere.material.dispose();
     this.transformControls.detach();
     this.scene.remove(this.transformControlsHelper);
     this.transformControls.dispose();
@@ -457,6 +472,10 @@ export class HybridViewer {
   }
 
   private syncSelectedObject(): void {
+    if (!this.selectedKind) {
+      this.transformControls.detach();
+      return;
+    }
     const selected = this.selectedKind === 'environment' ? this.splat : this.building;
     if (selected) this.transformControls.attach(selected);
     else this.transformControls.detach();

@@ -53,3 +53,21 @@ part upload, so an interrupted upload can resume by reselecting the same file af
 | `POST /projects/{projectId}/uploads/{sessionId}/parts/{partNumber}`     | Persists the part number, size, SHA-256 and S3 ETag.                                         |
 | `POST /projects/{projectId}/uploads/{sessionId}/complete`               | Completes S3 multipart upload, then validates size, S3 checksum metadata and file signature. |
 | `DELETE /projects/{projectId}/uploads/{sessionId}`                      | Explicitly aborts S3 multipart upload and marks the asset deleted.                           |
+
+## Phase 10 sharing endpoints
+
+The owner endpoints require a Firebase ID token and never accept a share token. A generated bearer token is returned
+only from creation or regeneration; MongoDB stores a SHA-256 hash, never the token.
+
+| Endpoint                                                     | Purpose                                                                                  |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `GET /projects/{projectId}/shares`                           | List owner-visible link metadata (never a token or hash).                                |
+| `POST /projects/{projectId}/shares`                          | Create a link with optional expiry and presentation permissions; returns the token once. |
+| `PATCH /projects/{projectId}/shares/{shareLinkId}`           | Enable/disable a non-revoked link or update its permissions/expiry.                      |
+| `POST /projects/{projectId}/shares/{shareLinkId}/regenerate` | Replace its token immediately; returns the replacement once.                             |
+| `DELETE /projects/{projectId}/shares/{shareLinkId}`          | Irreversibly revoke a link.                                                              |
+| `GET /public/shares/{token}/manifest`                        | Validate an enabled, unexpired token and issue a sanitized read-only manifest.           |
+
+The public route returns `404` for missing, disabled, revoked and expired links. It sends `Cache-Control: no-store`,
+`Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex, nofollow, noarchive`. Any asset URL in a successful public
+manifest is a five-minute S3 presigned URL.

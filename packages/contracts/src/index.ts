@@ -162,14 +162,24 @@ export const ViewerSettingsSchema = z.object({
 });
 
 /**
- * Migrate the pre-versioned Phase 4–6 scene shape to the first durable viewer-settings
- * version. Later unknown versions deliberately fail instead of being silently rewritten.
+ * Migrate the pre-versioned Phase 4–6 scene shape and the withdrawn version 2 sky settings
+ * back to the durable viewer-settings version. Later unknown versions deliberately fail instead
+ * of being silently rewritten.
  */
 export function migrateViewerSettings(value: unknown): ViewerSettings {
   if (value === undefined || value === null) {
     return ViewerSettingsSchema.parse({ schemaVersion: 1 });
   }
   if (typeof value === 'object' && !Array.isArray(value) && !('schemaVersion' in value)) {
+    return ViewerSettingsSchema.parse({ ...value, schemaVersion: 1 });
+  }
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    'schemaVersion' in value &&
+    value.schemaVersion === 2
+  ) {
     return ViewerSettingsSchema.parse({ ...value, schemaVersion: 1 });
   }
   return ViewerSettingsSchema.parse(value);
@@ -232,6 +242,64 @@ export const OwnerSceneManifestSchema = SceneManifestSchema.extend({
   variants: z.array(OwnerSceneVariantSchema).max(1),
 });
 
+export const SharePermissionsSchema = z.object({
+  allowVariantSwitching: z.boolean().default(true),
+  showAnnotations: z.boolean().default(true),
+  showProjectDescription: z.boolean().default(true),
+  showTechnicalInformation: z.boolean().default(false),
+});
+
+export const CreateShareLinkInputSchema = z.object({
+  expiresAt: z.string().datetime().nullable().optional(),
+  permissions: SharePermissionsSchema.partial().optional(),
+});
+
+export const UpdateShareLinkInputSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    expiresAt: z.string().datetime().nullable().optional(),
+    permissions: SharePermissionsSchema.partial().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, 'At least one share link field is required.');
+
+export const ShareLinkSchema = z.object({
+  id: z.string().min(1),
+  projectId: z.string().min(1),
+  enabled: z.boolean(),
+  expiresAt: z.string().datetime().nullable(),
+  revokedAt: z.string().datetime().nullable(),
+  permissions: SharePermissionsSchema,
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export const PublicAssetFormatSchema = z.enum(['PLY', 'SPZ', 'GLB']);
+
+export const PublicRuntimeAssetSchema = z.object({
+  url: z.string().url(),
+  format: PublicAssetFormatSchema,
+});
+
+export const PublicSceneVariantSchema = z.object({
+  name: z.string().min(1),
+  transform: TransformSchema,
+  visible: z.boolean(),
+  displayOrder: z.number().int().nonnegative(),
+  asset: PublicRuntimeAssetSchema,
+});
+
+/** A deliberately separate contract that never includes owner or storage metadata. */
+export const PublicShareManifestSchema = z.object({
+  project: z.object({ name: z.string().min(1) }),
+  permissions: SharePermissionsSchema,
+  environment: PublicRuntimeAssetSchema.optional(),
+  environmentTransform: TransformSchema,
+  variants: z.array(PublicSceneVariantSchema).max(1),
+  viewerSettings: ViewerSettingsSchema,
+  defaultCamera: DefaultCameraSchema.nullable(),
+  annotations: z.array(SceneAnnotationSchema),
+});
+
 export type Transform = z.infer<typeof TransformSchema>;
 export type AssetState = z.infer<typeof AssetStateSchema>;
 export type AssetKind = z.infer<typeof AssetKindSchema>;
@@ -261,3 +329,11 @@ export type SceneAnnotation = z.infer<typeof SceneAnnotationSchema>;
 export type SceneUpdateInput = z.infer<typeof SceneUpdateInputSchema>;
 export type SceneManifest = z.infer<typeof SceneManifestSchema>;
 export type OwnerSceneManifest = z.infer<typeof OwnerSceneManifestSchema>;
+export type SharePermissions = z.infer<typeof SharePermissionsSchema>;
+export type CreateShareLinkInput = z.infer<typeof CreateShareLinkInputSchema>;
+export type UpdateShareLinkInput = z.infer<typeof UpdateShareLinkInputSchema>;
+export type ShareLink = z.infer<typeof ShareLinkSchema>;
+export type PublicAssetFormat = z.infer<typeof PublicAssetFormatSchema>;
+export type PublicRuntimeAsset = z.infer<typeof PublicRuntimeAssetSchema>;
+export type PublicSceneVariant = z.infer<typeof PublicSceneVariantSchema>;
+export type PublicShareManifest = z.infer<typeof PublicShareManifestSchema>;

@@ -158,3 +158,27 @@ surface.
 Verified: full workspace formatting and lint, tests, TypeScript type-check and production builds. Live acceptance
 needs a ready environment and GLB to verify gizmo interaction, reload persistence, undo/reset and the proxy
 ground in a browser.
+
+## Phase 10: Anonymous read-only sharing (implementation complete; live acceptance pending)
+
+Implemented a separate `share_links` MongoDB collection with indexes for hashed random bearer tokens, project lookup
+and active-link validation. Owner-only APIs create, list, enable/disable, regenerate and permanently revoke links;
+tokens use 32 random bytes encoded as base64url and are returned only on creation/regeneration. MongoDB stores only
+their SHA-256 hashes. Optional expiry and all four documented presentation permissions are persisted.
+
+`GET /public/shares/{token}/manifest` is deliberately unauthenticated and accepts only a valid enabled, non-revoked,
+unexpired share token. It returns a distinct public contract with the project title, canonical scene presentation data,
+format-only asset descriptors and temporary S3 download URLs. It excludes owner identity, project/scene/asset IDs,
+upload metadata and original filenames. Disabled, expired and revoked links all return the same 404 response. Future
+manifest issuance stops immediately; an S3 URL already received remains usable for no more than five minutes. Public
+response headers and the web shell set noindex/no-follow/no-referrer protections; the API error path never logs public
+request URLs, which contain bearer tokens.
+
+The owner editor now manages sharing and displays a copy-once generated link. `/share/{token}` is outside the Firebase
+provider and renders only a presentation viewer: it loads the public manifest, restores the saved opening camera and
+has no editor, owner, upload or mutation controls.
+
+Verified: contract, database, API and web type checks; API tests cover token hashing, anonymous manifest sanitization,
+the public response policy and immediate disablement. Live acceptance still needs a ready private environment/building
+pair in S3: create a share link, open it in an incognito browser, regenerate/revoke it, and confirm the five-minute
+asset-URL window.

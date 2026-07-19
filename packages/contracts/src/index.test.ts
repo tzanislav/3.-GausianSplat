@@ -109,5 +109,10 @@ test('migrates pre-versioned viewer settings and rejects unsupported versions', 
     environmentVisible: false,
     buildingVisible: true,
   });
-  expect(() => migrateViewerSettings({ schemaVersion: 2 })).toThrow();
+  expect(migrateViewerSettings({ schemaVersion: 2, sky: { visible: false } })).toEqual({
+    schemaVersion: 1,
+    environmentVisible: true,
+    buildingVisible: true,
+  });
+  expect(() => migrateViewerSettings({ schemaVersion: 3 })).toThrow();
 });

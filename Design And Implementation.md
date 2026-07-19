@@ -622,6 +622,8 @@ At this point, the application is a usable **private internal MVP**.
 
 **Goal:** Share a project without requiring the investor to register.
 
+**Status:** Implementation complete — live browser/S3 acceptance is still required.
+
 ### Steps
 
 1. Create the `share_links` collection.
@@ -660,12 +662,12 @@ GET /api/public/shares/{token}/manifest
 
 ### Acceptance
 
-* The link works in an incognito browser without login.
-* Disabling or revoking the link stops access, or the system explicitly documents the bounded expiry window for already-issued asset URLs.
-* An expired link stops access.
-* Anonymous viewers cannot change any project state.
-* Private owner information is absent from the public manifest.
-* Share tokens are never emitted into logs or analytics.
+* The link works in an incognito browser without login. (Implemented; live acceptance pending.)
+* Disabling or revoking the link stops access, or the system explicitly documents the bounded expiry window for already-issued asset URLs. (Implemented: future manifests stop immediately; previously issued S3 URLs last at most five minutes.)
+* An expired link stops access. (Implemented.)
+* Anonymous viewers cannot change any project state. (Implemented.)
+* Private owner information is absent from the public manifest. (Implemented.)
+* Share tokens are never emitted into logs or analytics. (Implemented.)
 
 This completes the **shareable MVP**.
 
