@@ -1,0 +1,78 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private development storage for Gaussian Viewer source assets.
+
+Parameters:
+  BucketName:
+    Type: String
+    MinLength: 3
+    MaxLength: 63
+    Description: Globally unique development bucket name.
+  WebOrigin:
+    Type: String
+    Default: http://localhost:5173
+    Description: Exact browser origin permitted to use presigned asset URLs.
+
+Resources:
+  PrivateAssetsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - content-type
+              - x-amz-checksum-sha256
+            AllowedMethods:
+              - GET
+              - HEAD
+              - PUT
+            AllowedOrigins:
+              - !Ref WebOrigin
+            ExposedHeaders:
+              - ETag
+              - x-amz-checksum-sha256
+            MaxAge: 3000
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteGaussianViewerMultipartUploads
+            Status: Enabled
+            Filter:
+              Prefix: projects/
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  PrivateAssetsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PrivateAssetsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt PrivateAssetsBucket.Arn
+              - !Sub '${PrivateAssetsBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+Outputs:
+  BucketName:
+    Value: !Ref PrivateAssetsBucket
+  BucketArn:
+    Value: !GetAtt PrivateAssetsBucket.Arn

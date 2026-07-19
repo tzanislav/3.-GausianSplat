@@ -1,0 +1,14 @@
+{
+  "Rules": [
+    {
+      "ID": "AbortIncompleteGaussianViewerMultipartUploads",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "projects/"
+      },
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 7
+      }
+    }
+  ]
+}

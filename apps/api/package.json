@@ -1,0 +1,27 @@
+{
+  "name": "@gaussian-viewer/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "test": "vitest run --exclude dist/**",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "catalog:",
+    "@aws-sdk/s3-request-presigner": "catalog:",
+    "@gaussian-viewer/auth": "workspace:*",
+    "@gaussian-viewer/config": "workspace:*",
+    "@gaussian-viewer/database": "workspace:*",
+    "@gaussian-viewer/contracts": "workspace:*",
+    "express": "catalog:"
+  },
+  "devDependencies": {
+    "@types/express": "catalog:",
+    "@types/node": "catalog:",
+    "tsx": "catalog:"
+  }
+}

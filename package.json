@@ -1,0 +1,26 @@
+{
+  "name": "gaussian-viewer",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.11.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present run build",
+    "dev": "pnpm --filter @gaussian-viewer/contracts run build && pnpm --filter @gaussian-viewer/config run build && pnpm --filter @gaussian-viewer/auth run build && pnpm --filter @gaussian-viewer/database run build && pnpm --filter @gaussian-viewer/viewer-core run build && pnpm --parallel --filter @gaussian-viewer/web --filter @gaussian-viewer/api run dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . && pnpm run format:check",
+    "test": "pnpm --filter @gaussian-viewer/contracts run build && pnpm --filter @gaussian-viewer/config run build && pnpm -r --if-present run test",
+    "typecheck": "pnpm run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "catalog:",
+    "eslint": "catalog:",
+    "prettier": "latest",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:",
+    "vitest": "catalog:"
+  }
+}
