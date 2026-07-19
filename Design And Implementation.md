@@ -649,6 +649,12 @@ GET /api/public/shares/{token}/manifest
 10. Add `noindex` and a restrictive referrer policy.
 11. Ensure mutation endpoints never accept share-token authentication.
 
+### Shared sky controls (completed addition)
+
+The fixed scene sky sphere has durable visibility and Y-axis rotation settings. Both the owner and
+anonymous shared viewer apply the same settings. Viewer settings version 1 records migrate to
+version 2 with the sky visible and unrotated.
+
 ### Share permissions
 
 ```json

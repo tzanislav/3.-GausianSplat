@@ -155,32 +155,38 @@ export const ProjectSummarySchema = z.object({
   ),
 });
 
+export const SkySettingsSchema = z.object({
+  visible: z.boolean().default(true),
+  rotationYDegrees: z.number().finite().default(0),
+});
+
 export const ViewerSettingsSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   environmentVisible: z.boolean().default(true),
   buildingVisible: z.boolean().default(true),
+  sky: SkySettingsSchema.default({ visible: true, rotationYDegrees: 0 }),
 });
 
 /**
- * Migrate the pre-versioned Phase 4–6 scene shape and the withdrawn version 2 sky settings
- * back to the durable viewer-settings version. Later unknown versions deliberately fail instead
- * of being silently rewritten.
+ * Migrate the pre-versioned Phase 4–6 scene shape and version 1 settings to the current
+ * durable viewer-settings version. Later unknown versions deliberately fail instead of being
+ * silently rewritten.
  */
 export function migrateViewerSettings(value: unknown): ViewerSettings {
   if (value === undefined || value === null) {
-    return ViewerSettingsSchema.parse({ schemaVersion: 1 });
+    return ViewerSettingsSchema.parse({ schemaVersion: 2 });
   }
   if (typeof value === 'object' && !Array.isArray(value) && !('schemaVersion' in value)) {
-    return ViewerSettingsSchema.parse({ ...value, schemaVersion: 1 });
+    return ViewerSettingsSchema.parse({ ...value, schemaVersion: 2 });
   }
   if (
     typeof value === 'object' &&
     value !== null &&
     !Array.isArray(value) &&
     'schemaVersion' in value &&
-    value.schemaVersion === 2
+    value.schemaVersion === 1
   ) {
-    return ViewerSettingsSchema.parse({ ...value, schemaVersion: 1 });
+    return ViewerSettingsSchema.parse({ ...value, schemaVersion: 2 });
   }
   return ViewerSettingsSchema.parse(value);
 }

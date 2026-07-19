@@ -16,6 +16,7 @@ import {
   SRGBColorSpace,
   SphereGeometry,
   Texture,
+  TextureLoader,
   WebGLRenderer,
   type Material,
   type Object3D,
@@ -226,12 +227,17 @@ export class HybridViewer {
     sun.position.set(8, 12, 5);
     this.scene.add(sun);
 
+    //Sky ================================================================================================
+    const texture = new TextureLoader().load('/sky.jpg');
+
     this.testSphere = new Mesh(
-      new SphereGeometry(10, 32, 16),
-      new MeshBasicMaterial({ color: '#6f89a6', side: BackSide }),
+      new SphereGeometry(1000, 32, 16),
+      new MeshBasicMaterial({ map: texture, side: BackSide }),
     );
     this.testSphere.name = 'Test sphere';
     this.scene.add(this.testSphere);
+
+    //End Sky  ===========================================================================================
 
     this.spark = new SparkRenderer({
       renderer: this.renderer,
@@ -248,6 +254,7 @@ export class HybridViewer {
     this.resize();
     this.renderer.setAnimationLoop(() => {
       this.controls.update();
+      this.update();
       this.renderer.render(this.scene, this.camera);
     });
   }
@@ -329,6 +336,16 @@ export class HybridViewer {
     }
   }
 
+  setSkyVisible(visible: boolean): void {
+    this.assertActive();
+    this.testSphere.visible = visible;
+  }
+
+  setSkyRotation(rotationYDegrees: number): void {
+    this.assertActive();
+    this.testSphere.rotation.y = (rotationYDegrees * Math.PI) / 180;
+  }
+
   selectAsset(kind: AssetKind | undefined): void {
     this.assertActive();
     this.selectedKind = kind;
@@ -398,6 +415,10 @@ export class HybridViewer {
     this.camera.updateProjectionMatrix();
     this.controls.target.fromArray(camera.target);
     this.controls.update();
+  }
+
+  update() {
+    this.testSphere.position.copy(this.camera.position);
   }
 
   dispose(): void {

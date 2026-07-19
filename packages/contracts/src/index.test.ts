@@ -7,7 +7,7 @@ test('accepts a minimal scene manifest', () => {
     projectId: 'project-1',
     revision: 0,
     variants: [],
-    viewerSettings: { schemaVersion: 1, environmentVisible: true, buildingVisible: true },
+    viewerSettings: { schemaVersion: 2, environmentVisible: true, buildingVisible: true },
     defaultCamera: null,
     annotations: [],
     environmentTransform: {
@@ -26,7 +26,7 @@ test('rejects non-positive transform scale', () => {
     projectId: 'project-1',
     revision: 0,
     variants: [],
-    viewerSettings: { schemaVersion: 1, environmentVisible: true, buildingVisible: true },
+    viewerSettings: { schemaVersion: 2, environmentVisible: true, buildingVisible: true },
     defaultCamera: null,
     annotations: [],
     environmentTransform: {
@@ -45,7 +45,7 @@ test('rejects an uploaded asset from a scene manifest', () => {
     projectId: 'project-1',
     revision: 0,
     variants: [],
-    viewerSettings: { schemaVersion: 1, environmentVisible: true, buildingVisible: true },
+    viewerSettings: { schemaVersion: 2, environmentVisible: true, buildingVisible: true },
     defaultCamera: null,
     annotations: [],
     environment: { id: 'asset-1', kind: 'ENVIRONMENT', state: 'UPLOADED' },
@@ -90,7 +90,7 @@ test('limits the Phase 8 scene to one building variant', () => {
         displayOrder: 1,
       },
     ],
-    viewerSettings: { schemaVersion: 1, environmentVisible: true, buildingVisible: true },
+    viewerSettings: { schemaVersion: 2, environmentVisible: true, buildingVisible: true },
     defaultCamera: null,
     annotations: [],
     environmentTransform: {
@@ -105,14 +105,16 @@ test('limits the Phase 8 scene to one building variant', () => {
 
 test('migrates pre-versioned viewer settings and rejects unsupported versions', () => {
   expect(migrateViewerSettings({ environmentVisible: false })).toEqual({
-    schemaVersion: 1,
+    schemaVersion: 2,
     environmentVisible: false,
     buildingVisible: true,
+    sky: { visible: true, rotationYDegrees: 0 },
   });
-  expect(migrateViewerSettings({ schemaVersion: 2, sky: { visible: false } })).toEqual({
-    schemaVersion: 1,
+  expect(migrateViewerSettings({ schemaVersion: 1 })).toEqual({
+    schemaVersion: 2,
     environmentVisible: true,
     buildingVisible: true,
+    sky: { visible: true, rotationYDegrees: 0 },
   });
   expect(() => migrateViewerSettings({ schemaVersion: 3 })).toThrow();
 });

@@ -1278,6 +1278,8 @@ function PersistentProjectViewer({
         const loaded = (await response.json()) as OwnerSceneManifest;
         const viewer = viewerRef.current;
         if (!viewer || !active) return;
+        viewer.setSkyVisible(loaded.viewerSettings.sky.visible);
+        viewer.setSkyRotation(loaded.viewerSettings.sky.rotationYDegrees);
         viewer.clearAsset('environment');
         viewer.clearAsset('building');
         if (loaded.environment) {
@@ -1432,6 +1434,25 @@ function PersistentProjectViewer({
         ...current.viewerSettings,
         [kind === 'environment' ? 'environmentVisible' : 'buildingVisible']: visible,
       },
+    };
+    manifestRef.current = updated;
+    desiredViewerSettingsRef.current = updated.viewerSettings;
+    setManifest(updated);
+    settingsDirtyRef.current = true;
+    setSettingsDirty(true);
+  }
+
+  function updateSkySettings(update: Partial<ViewerSettings['sky']>) {
+    const current = manifestRef.current;
+    if (!current || conflictRef.current) return;
+    const sky = { ...current.viewerSettings.sky, ...update };
+    if (update.visible !== undefined) viewerRef.current?.setSkyVisible(update.visible);
+    if (update.rotationYDegrees !== undefined) {
+      viewerRef.current?.setSkyRotation(update.rotationYDegrees);
+    }
+    const updated = {
+      ...current,
+      viewerSettings: { ...current.viewerSettings, sky },
     };
     manifestRef.current = updated;
     desiredViewerSettingsRef.current = updated.viewerSettings;
@@ -1611,6 +1632,12 @@ function PersistentProjectViewer({
             onChange={(visible) => updateVisibility('building', visible)}
             disabled={!manifest || sceneConflict}
           />
+          <Toggle
+            label="Sky"
+            checked={manifest?.viewerSettings.sky.visible ?? true}
+            onChange={(visible) => updateSkySettings({ visible })}
+            disabled={!manifest || sceneConflict}
+          />
           <button
             className="auth-button"
             type="button"
@@ -1700,6 +1727,21 @@ function PersistentProjectViewer({
           </section>
           <section>
             <h2>Display</h2>
+            <label className="transform-controls__row">
+              <span>Sky Y rotation (°)</span>
+              <input
+                type="number"
+                step="1"
+                value={manifest?.viewerSettings.sky.rotationYDegrees ?? 0}
+                disabled={!manifest || sceneConflict}
+                onChange={(event) => {
+                  const rotationYDegrees = Number(event.target.value);
+                  if (Number.isFinite(rotationYDegrees)) {
+                    updateSkySettings({ rotationYDegrees });
+                  }
+                }}
+              />
+            </label>
             <label className="opacity-control">
               <span>Building opacity</span>
               <input

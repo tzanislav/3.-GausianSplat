@@ -6,7 +6,7 @@ import {
   signInWithPopup,
   signOut as firebaseSignOut,
 } from 'firebase/auth';
-import { firebaseAuth, googleProvider } from './firebase.js';
+import { firebaseAuth, firebaseAuthReady, googleProvider } from './firebase.js';
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 
@@ -29,7 +29,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     let active = true;
 
-    const unsubscribe = onIdTokenChanged(firebaseAuth, (nextUser) => {
+    function handleUserChange(nextUser: User | null) {
       if (!nextUser) {
         if (active) {
           setUser(null);
@@ -57,11 +57,29 @@ export function AuthProvider({ children }: PropsWithChildren) {
             setStatus('error');
           }
         });
-    });
+    }
+
+    let unsubscribe: (() => void) | undefined;
+    void firebaseAuthReady
+      .then(() => {
+        if (active) {
+          unsubscribe = onIdTokenChanged(firebaseAuth, handleUserChange);
+        }
+      })
+      .catch((persistenceError: unknown) => {
+        if (active) {
+          setError(
+            persistenceError instanceof Error
+              ? persistenceError.message
+              : 'Authentication storage could not be initialized.',
+          );
+          setStatus('error');
+        }
+      });
 
     return () => {
       active = false;
-      unsubscribe();
+      unsubscribe?.();
     };
   }, []);
 

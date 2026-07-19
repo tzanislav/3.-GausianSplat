@@ -182,3 +182,12 @@ Verified: contract, database, API and web type checks; API tests cover token has
 the public response policy and immediate disablement. Live acceptance still needs a ready private environment/building
 pair in S3: create a share link, open it in an incognito browser, regenerate/revoke it, and confirm the five-minute
 asset-URL window.
+
+## Shared sky controls (Phase 10 addition)
+
+The existing sky sphere now has durable visibility and Y-axis rotation settings. The owner editor
+persists both values through the revision-checked scene queue, and shared viewers apply those
+same values from the public manifest. Viewer settings version 1 migrates to version 2 with a
+visible, unrotated sky; no MongoDB migration is required.
+
+Verified: `pnpm run test`, `pnpm run build`, and `pnpm run lint`.

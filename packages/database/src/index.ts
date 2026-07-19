@@ -317,7 +317,12 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
             scale: [1, 1, 1],
           },
           variants: [],
-          viewerSettings: { schemaVersion: 1, environmentVisible: true, buildingVisible: true },
+          viewerSettings: {
+            schemaVersion: 2,
+            environmentVisible: true,
+            buildingVisible: true,
+            sky: { visible: true, rotationYDegrees: 0 },
+          },
           defaultCamera: null,
           createdAt: now,
           updatedAt: now,

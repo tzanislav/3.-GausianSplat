@@ -453,7 +453,7 @@ export function createApp(dependencies: AppDependencies = {}): Express {
           const schemaVersion = request.body?.viewerSettings?.schemaVersion;
           response.status(400).json({
             error:
-              typeof schemaVersion === 'number' && schemaVersion !== 1
+              typeof schemaVersion === 'number' && schemaVersion !== 2
                 ? 'Viewer settings use an unsupported schema version.'
                 : 'Scene settings are invalid.',
           });

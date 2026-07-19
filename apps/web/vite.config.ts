@@ -14,6 +14,7 @@ export default defineConfig(({ mode }) => {
       // The Vite proxy continues to keep the API on the loopback interface.
       host: localDevIp ? true : 'localhost',
       port: 5173,
+      strictPort: true,
       proxy: {
         '/api': {
           target: 'http://127.0.0.1:3001',

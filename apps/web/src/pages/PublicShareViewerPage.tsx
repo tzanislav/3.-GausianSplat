@@ -39,6 +39,8 @@ export function PublicShareViewerPage({ token }: { token: string }) {
         const loaded = (await response.json()) as PublicShareManifest;
         const viewer = viewerRef.current;
         if (!active || !viewer) return;
+        viewer.setSkyVisible(loaded.viewerSettings.sky.visible);
+        viewer.setSkyRotation(loaded.viewerSettings.sky.rotationYDegrees);
         viewer.clearAsset('environment');
         viewer.clearAsset('building');
         if (loaded.environment) {

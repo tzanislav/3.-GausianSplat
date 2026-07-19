@@ -440,7 +440,12 @@ test('scene manifests resolve private environment keys and scene updates reject 
       scale: [1, 1, 1],
     },
     variants: [],
-    viewerSettings: { schemaVersion: 1, environmentVisible: true, buildingVisible: true },
+    viewerSettings: {
+      schemaVersion: 2,
+      environmentVisible: true,
+      buildingVisible: true,
+      sky: { visible: true, rotationYDegrees: 0 },
+    },
     defaultCamera: null,
     createdAt: '2026-07-18T00:00:00.000Z',
     updatedAt: '2026-07-18T00:00:00.000Z',
@@ -590,7 +595,12 @@ test('scene manifests resolve private environment keys and scene updates reject 
           displayOrder: 0,
         },
       ],
-      viewerSettings: { schemaVersion: 1, environmentVisible: false, buildingVisible: true },
+      viewerSettings: {
+        schemaVersion: 2,
+        environmentVisible: false,
+        buildingVisible: true,
+        sky: { visible: false, rotationYDegrees: 45 },
+      },
       defaultCamera: { position: [1, 2, 3], target: [0, 0, 0], fov: 65 },
     };
     const update = await fetch(`${manifestOrigin}/projects/owner-project/scene`, {
@@ -623,7 +633,7 @@ test('scene manifests resolve private environment keys and scene updates reject 
     const invalid = await fetch(`${manifestOrigin}/projects/owner-project/scene`, {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ ...updateBody, revision: 4, viewerSettings: { schemaVersion: 2 } }),
+      body: JSON.stringify({ ...updateBody, revision: 4, viewerSettings: { schemaVersion: 3 } }),
     });
     expect(invalid.status).toBe(400);
     await expect(invalid.json()).resolves.toEqual({
@@ -705,7 +715,12 @@ test('anonymous share manifests are token-only, sanitized and immediately respec
         displayOrder: 0,
       },
     ],
-    viewerSettings: { schemaVersion: 1, environmentVisible: true, buildingVisible: true },
+    viewerSettings: {
+      schemaVersion: 2,
+      environmentVisible: true,
+      buildingVisible: true,
+      sky: { visible: true, rotationYDegrees: 0 },
+    },
     defaultCamera: { position: [3, 2, 3], target: [0, 0, 0], fov: 55 },
     createdAt: '2026-07-18T00:00:00.000Z',
     updatedAt: '2026-07-18T00:00:00.000Z',
