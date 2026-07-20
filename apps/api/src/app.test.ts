@@ -3,6 +3,7 @@ import type { TokenVerifier } from '@gaussian-viewer/auth';
 import type { AssetRecord, AssetUploadTicket, ShareLink } from '@gaussian-viewer/contracts';
 import type {
   AssetRepository,
+  AnnotationCommentRepository,
   ProjectRepository,
   SceneRecord,
   SceneRepository,
@@ -591,6 +592,8 @@ test('scene manifests resolve private environment keys and scene updates reject 
       },
     },
     defaultCamera: null,
+    annotations: [],
+    annotationScale: 10,
     createdAt: '2026-07-18T00:00:00.000Z',
     updatedAt: '2026-07-18T00:00:00.000Z',
   };
@@ -886,6 +889,27 @@ test('anonymous share manifests are token-only, sanitized and immediately respec
       },
     },
     defaultCamera: { position: [3, 2, 3], target: [0, 0, 0], fov: 55 },
+    annotations: [
+      {
+        id: 'public-annotation',
+        position: [1, 2, 3],
+        title: 'Public note',
+        description: 'Shown to investors',
+        color: '#78b8f6',
+        labelOffset: [16, -8, 0],
+        visibility: 'PUBLIC',
+      },
+      {
+        id: 'private-annotation',
+        position: [4, 5, 6],
+        title: 'Internal note',
+        description: 'Owner only',
+        color: '#ff0000',
+        labelOffset: [16, -8, 0],
+        visibility: 'PRIVATE',
+      },
+    ],
+    annotationScale: 10,
     createdAt: '2026-07-18T00:00:00.000Z',
     updatedAt: '2026-07-18T00:00:00.000Z',
   };
@@ -1035,6 +1059,23 @@ test('anonymous share manifests are token-only, sanitized and immediately respec
     async completeMultipartUpload() {},
     async abortMultipartUpload() {},
   };
+  const createdComments: Array<{ annotationId: string; body: string }> = [];
+  const annotationComments: AnnotationCommentRepository = {
+    async createComment(input) {
+      createdComments.push({ annotationId: input.annotationId, body: input.body });
+      return {
+        id: `comment-${createdComments.length}`,
+        annotationId: input.annotationId,
+        body: input.body,
+        createdAt: '2026-07-18T00:00:00.000Z',
+        readAt: null,
+      };
+    },
+    async listProjectComments() {
+      return [];
+    },
+    async markProjectCommentsRead() {},
+  };
   const shareServer = createApp({
     tokenVerifier: verifier,
     users,
@@ -1042,6 +1083,7 @@ test('anonymous share manifests are token-only, sanitized and immediately respec
     scenes,
     assets,
     shares,
+    annotationComments,
     storage,
   }).listen(0);
   await new Promise<void>((resolve) => shareServer.once('listening', resolve));
@@ -1076,11 +1118,35 @@ test('anonymous share manifests are token-only, sanitized and immediately respec
       project: { name: 'Presentation project' },
       environment: { format: 'SPZ' },
       variants: [{ name: 'Approved design', asset: { format: 'GLB' } }],
+      annotations: [{ id: 'public-annotation', title: 'Public note' }],
     });
     expect(manifest).not.toHaveProperty('projectId');
     expect(JSON.stringify(manifest)).not.toContain('owner-id');
+    expect(JSON.stringify(manifest)).not.toContain('Internal note');
     expect(JSON.stringify(manifest)).not.toContain('private-site.spz');
     expect(JSON.stringify(manifest)).not.toContain('private-building.glb');
+
+    const comment = await fetch(
+      `${shareOrigin}/public/shares/${createdBody.token}/annotations/public-annotation/comments`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: 'Please share the daylight study.' }),
+      },
+    );
+    expect(comment.status).toBe(201);
+    expect(createdComments).toEqual([
+      { annotationId: 'public-annotation', body: 'Please share the daylight study.' },
+    ]);
+    const privateComment = await fetch(
+      `${shareOrigin}/public/shares/${createdBody.token}/annotations/private-annotation/comments`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: 'This must stay internal.' }),
+      },
+    );
+    expect(privateComment.status).toBe(404);
 
     const disabled = await fetch(
       `${shareOrigin}/projects/owner-project/shares/${createdBody.link.id}`,
@@ -1110,6 +1176,7 @@ function projectSummary(id: string, name: string) {
     createdAt: '2026-07-18T00:00:00.000Z',
     updatedAt: '2026-07-18T01:00:00.000Z',
     archivedAt: null,
+    unreadAnnotationCommentCount: 0,
     assets: [],
   };
 }

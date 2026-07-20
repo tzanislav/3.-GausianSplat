@@ -1,9 +1,10 @@
-import type { DefaultCamera, Transform } from '@gaussian-viewer/contracts';
+import type { DefaultCamera, SceneAnnotation, Transform } from '@gaussian-viewer/contracts';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
 import {
   AmbientLight,
   BackSide,
   Color,
+  CircleGeometry,
   DirectionalLight,
   Euler,
   Group,
@@ -14,11 +15,15 @@ import {
   PerspectiveCamera,
   Quaternion,
   Scene,
+  ShaderMaterial,
   SRGBColorSpace,
   SphereGeometry,
   Texture,
   TextureLoader,
   WebGLRenderer,
+  Raycaster,
+  Vector2,
+  Vector3,
   type Material,
   type Object3D,
 } from 'three';
@@ -37,6 +42,13 @@ export const DEFAULT_TRANSFORM: Transform = {
 export type ViewerStatus = 'idle' | 'loading-environment' | 'loading-building' | 'ready' | 'error';
 export type AssetKind = 'environment' | 'building';
 export type TransformGizmoMode = 'translate' | 'rotate';
+
+export interface AnnotationScreenPosition {
+  id: string;
+  x: number;
+  y: number;
+  visible: boolean;
+}
 
 export interface ViewerState {
   status: ViewerStatus;
@@ -76,6 +88,15 @@ export interface HybridViewerOptions {
   onTransformStart?: (kind: AssetKind, transform: Transform) => void;
   onTransformChange?: (kind: AssetKind, transform: Transform) => void;
   onSunRotationChange?: (rotationDegrees: [number, number, number]) => void;
+  onAnnotationClick?: (annotationId: string) => void;
+  onAnnotationTransformStart?: (
+    annotationId: string,
+    position: SceneAnnotation['position'],
+  ) => void;
+  onAnnotationTransformChange?: (
+    annotationId: string,
+    position: SceneAnnotation['position'],
+  ) => void;
 }
 
 export function applyTransform(object: Object3D, transform: Transform): void {
@@ -176,6 +197,9 @@ export class HybridViewer {
   private readonly onTransformStart?: HybridViewerOptions['onTransformStart'];
   private readonly onTransformChange?: HybridViewerOptions['onTransformChange'];
   private readonly onSunRotationChange?: HybridViewerOptions['onSunRotationChange'];
+  private readonly onAnnotationClick?: HybridViewerOptions['onAnnotationClick'];
+  private readonly onAnnotationTransformStart?: HybridViewerOptions['onAnnotationTransformStart'];
+  private readonly onAnnotationTransformChange?: HybridViewerOptions['onAnnotationTransformChange'];
   private splat?: SplatMesh;
   private building?: Object3D;
   private proxyGround?: Mesh;
@@ -183,7 +207,16 @@ export class HybridViewer {
   private readonly sunLight: DirectionalLight;
   private readonly sunRotationHandle = new Group();
   private readonly testSphere: Mesh<SphereGeometry, MeshBasicMaterial>;
+  private readonly annotationRoot = new Group();
+  private readonly annotationMarkers = new Map<string, Group>();
+  private readonly raycaster = new Raycaster();
+  private readonly pointer = new Vector2();
+  private readonly annotationWorldPosition = new Vector3();
+  private readonly annotationViewPosition = new Vector3();
+  private readonly annotationNdcPosition = new Vector3();
+  private selectedAnnotationId?: string;
   private selectedKind?: AssetKind;
+  private transformGizmoVisible = true;
   private disposed = false;
 
   constructor(canvas: HTMLCanvasElement, options: HybridViewerOptions = {}) {
@@ -193,6 +226,9 @@ export class HybridViewer {
     this.onTransformStart = options.onTransformStart;
     this.onTransformChange = options.onTransformChange;
     this.onSunRotationChange = options.onSunRotationChange;
+    this.onAnnotationClick = options.onAnnotationClick;
+    this.onAnnotationTransformStart = options.onAnnotationTransformStart;
+    this.onAnnotationTransformChange = options.onAnnotationTransformChange;
 
     this.renderer = new WebGLRenderer({
       canvas,
@@ -219,6 +255,11 @@ export class HybridViewer {
       const object = this.transformControls.object;
       if (object && this.selectedKind) {
         this.onTransformStart?.(this.selectedKind, transformFromObject(object));
+      } else if (object && this.selectedAnnotationId) {
+        this.onAnnotationTransformStart?.(
+          this.selectedAnnotationId,
+          object.position.toArray() as SceneAnnotation['position'],
+        );
       }
     });
     this.transformControls.addEventListener('objectChange', () => {
@@ -229,9 +270,18 @@ export class HybridViewer {
       }
       if (object && this.selectedKind) {
         this.onTransformChange?.(this.selectedKind, transformFromObject(object));
+      } else if (object && this.selectedAnnotationId) {
+        this.onAnnotationTransformChange?.(
+          this.selectedAnnotationId,
+          object.position.toArray() as SceneAnnotation['position'],
+        );
       }
     });
     this.scene.add(this.transformControlsHelper);
+    this.annotationRoot.name = 'Annotations';
+    this.annotationRoot.renderOrder = 10_000;
+    this.scene.add(this.annotationRoot);
+    canvas.addEventListener('click', this.handleAnnotationClick);
 
     this.ambientLight = new AmbientLight(0xffffff, 1.8);
     this.scene.add(this.ambientLight);
@@ -405,12 +455,77 @@ export class HybridViewer {
   selectAsset(kind: AssetKind | undefined): void {
     this.assertActive();
     this.selectedKind = kind;
+    this.selectedAnnotationId = undefined;
     this.syncSelectedObject();
   }
 
   setTransformGizmoMode(mode: TransformGizmoMode): void {
     this.assertActive();
     this.transformControls.setMode(mode);
+  }
+
+  setTransformGizmoVisible(visible: boolean): void {
+    this.assertActive();
+    this.transformGizmoVisible = visible;
+    this.syncSelectedObject();
+  }
+
+  setAnnotations(annotations: SceneAnnotation[], scale = 10): void {
+    this.assertActive();
+    this.clearAnnotations();
+    for (const annotation of annotations) {
+      const marker = createAnnotationMarker(annotation, scale);
+      this.annotationMarkers.set(annotation.id, marker);
+      this.annotationRoot.add(marker);
+    }
+    this.syncSelectedObject();
+  }
+
+  setAnnotationPosition(annotationId: string, position: SceneAnnotation['position']): void {
+    this.assertActive();
+    this.annotationMarkers.get(annotationId)?.position.fromArray(position);
+  }
+
+  setAnnotationScale(scale: number): void {
+    this.assertActive();
+    this.annotationMarkers.forEach((marker) => marker.scale.setScalar(scale));
+  }
+
+  setAnnotationsVisible(visible: boolean): void {
+    this.assertActive();
+    this.annotationRoot.visible = visible;
+  }
+
+  selectAnnotation(annotationId: string | undefined): void {
+    this.assertActive();
+    this.selectedAnnotationId = annotationId;
+    this.selectedKind = undefined;
+    this.syncSelectedObject();
+  }
+
+  getAnnotationScreenPositions(): AnnotationScreenPosition[] {
+    this.assertActive();
+    const width = this.canvas.clientWidth;
+    const height = this.canvas.clientHeight;
+    if (width < 1 || height < 1) return [];
+    return [...this.annotationMarkers.entries()].map(([id, marker]) => {
+      marker.getWorldPosition(this.annotationWorldPosition);
+      this.annotationViewPosition
+        .copy(this.annotationWorldPosition)
+        .applyMatrix4(this.camera.matrixWorldInverse);
+      this.annotationNdcPosition.copy(this.annotationWorldPosition).project(this.camera);
+      return {
+        id,
+        x: (this.annotationNdcPosition.x * 0.5 + 0.5) * width,
+        y: (-this.annotationNdcPosition.y * 0.5 + 0.5) * height,
+        visible:
+          this.annotationViewPosition.z < 0 &&
+          Math.abs(this.annotationNdcPosition.x) <= 1 &&
+          Math.abs(this.annotationNdcPosition.y) <= 1 &&
+          this.annotationNdcPosition.z >= -1 &&
+          this.annotationNdcPosition.z <= 1,
+      };
+    });
   }
 
   setBuildingOpacity(opacity: number): void {
@@ -494,6 +609,11 @@ export class HybridViewer {
 
   update() {
     this.testSphere.position.copy(this.camera.position);
+    this.annotationMarkers.forEach((marker) => {
+      marker.quaternion.identity();
+      const outline = marker.getObjectByName('Annotation outline');
+      outline?.quaternion.copy(this.camera.quaternion);
+    });
   }
 
   dispose(): void {
@@ -517,6 +637,9 @@ export class HybridViewer {
     this.transformControls.dispose();
     this.scene.remove(this.spark);
     this.spark.dispose();
+    this.canvas.removeEventListener('click', this.handleAnnotationClick);
+    this.clearAnnotations();
+    this.scene.remove(this.annotationRoot);
     this.renderer.dispose();
   }
 
@@ -569,14 +692,51 @@ export class HybridViewer {
   }
 
   private syncSelectedObject(): void {
-    if (!this.selectedKind) {
+    if (!this.transformGizmoVisible) {
       this.transformControls.detach();
       return;
     }
-    const selected = this.selectedKind === 'environment' ? this.splat : this.building;
+    const selected = this.selectedKind
+      ? this.selectedKind === 'environment'
+        ? this.splat
+        : this.building
+      : this.selectedAnnotationId
+        ? this.annotationMarkers.get(this.selectedAnnotationId)
+        : undefined;
     if (selected) this.transformControls.attach(selected);
     else this.transformControls.detach();
   }
+
+  private clearAnnotations(): void {
+    this.annotationMarkers.forEach((marker) => {
+      this.annotationRoot.remove(marker);
+      marker.traverse((object) => {
+        if (object instanceof Mesh) {
+          object.geometry.dispose();
+          const material = object.material;
+          if (Array.isArray(material)) material.forEach(disposeMaterial);
+          else disposeMaterial(material);
+        }
+      });
+    });
+    this.annotationMarkers.clear();
+  }
+
+  private handleAnnotationClick = (event: MouseEvent): void => {
+    if (!this.onAnnotationClick || this.transformControls.dragging) return;
+    const bounds = this.canvas.getBoundingClientRect();
+    this.pointer.set(
+      ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
+      -((event.clientY - bounds.top) / bounds.height) * 2 + 1,
+    );
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hit = this.raycaster.intersectObjects([...this.annotationMarkers.values()], true)[0];
+    if (!hit) return;
+    let marker: Object3D | null = hit.object;
+    while (marker && !marker.userData.annotationId) marker = marker.parent;
+    if (marker?.userData.annotationId)
+      this.onAnnotationClick(marker.userData.annotationId as string);
+  };
 
   private applySunRotationFromHandle(notify = false): void {
     this.sunLight.position.set(8, 12, 5).applyEuler(this.sunRotationHandle.rotation);
@@ -630,4 +790,54 @@ function disposeMaterial(material: Material): void {
     }
   }
   material.dispose();
+}
+
+function createAnnotationMarker(annotation: SceneAnnotation, scale: number): Group {
+  const marker = new Group();
+  marker.name = `Annotation: ${annotation.title}`;
+  marker.userData.annotationId = annotation.id;
+  marker.position.fromArray(annotation.position);
+  marker.scale.setScalar(scale);
+
+  const circle = new Mesh(
+    new CircleGeometry(0.12, 32),
+    new ShaderMaterial({
+      uniforms: { uColor: { value: new Color(annotation.color) } },
+      vertexShader: `
+        varying vec2 vUv;
+        varying vec3 vNormal;
+        varying vec3 vViewPosition;
+        void main() {
+          vUv = uv;
+          vNormal = normalize(normalMatrix * normal);
+          vec4 modelViewPosition = modelViewMatrix * vec4(position, 1.0);
+          vViewPosition = -modelViewPosition.xyz;
+          gl_Position = projectionMatrix * modelViewPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uColor;
+        varying vec2 vUv;
+        varying vec3 vNormal;
+        varying vec3 vViewPosition;
+        void main() {
+          float radius = length(vUv - vec2(0.5)) * 2.0;
+          float radialOutline = smoothstep(0.62, 0.84, radius) * (1.0 - smoothstep(0.95, 1.0, radius));
+          float fresnel = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition))), 2.0);
+          float outline = max(radialOutline, fresnel);
+          if (outline < 0.01) discard;
+          gl_FragColor = vec4(uColor, outline);
+        }
+      `,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    }),
+  );
+  circle.name = 'Annotation outline';
+  circle.renderOrder = 10_000;
+  marker.add(circle);
+
+  return marker;
 }

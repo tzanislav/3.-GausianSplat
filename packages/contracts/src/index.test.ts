@@ -1,5 +1,10 @@
 import { expect, test } from 'vitest';
-import { migrateViewerSettings, SceneManifestSchema } from './index.js';
+import {
+  CreateAnnotationCommentInputSchema,
+  migrateViewerSettings,
+  SceneAnnotationSchema,
+  SceneManifestSchema,
+} from './index.js';
 
 test('accepts a minimal scene manifest', () => {
   const manifest = SceneManifestSchema.parse({
@@ -135,4 +140,20 @@ test('migrates pre-versioned viewer settings and rejects unsupported versions', 
     },
   });
   expect(() => migrateViewerSettings({ schemaVersion: 4 })).toThrow();
+});
+
+test('validates durable annotation details and bounded investor comments', () => {
+  expect(
+    SceneAnnotationSchema.parse({
+      id: 'annotation-1',
+      position: [1, 2, 3],
+      title: 'Arrival',
+      description: 'Entry sequence',
+      visibility: 'PUBLIC',
+    }),
+  ).toMatchObject({ color: '#78b8f6', labelOffset: [16, -8, 0] });
+  expect(CreateAnnotationCommentInputSchema.safeParse({ body: ' '.repeat(1) }).success).toBe(false);
+  expect(CreateAnnotationCommentInputSchema.safeParse({ body: 'Useful detail.' }).success).toBe(
+    true,
+  );
 });

@@ -222,3 +222,32 @@ as scene markers: those Phase 11 production capabilities remain out of scope for
 
 Verified: `pnpm run lint`, `pnpm run test`, and `pnpm run build`. Manual acceptance: confirm the
 four tabs and their controls in an authenticated editor with ready environment/building assets.
+
+## Phase 11: Annotations (implementation complete; live acceptance pending)
+
+Annotations are durable scene state protected by the existing revision check. The owner editor adds a new marker at
+canonical `[0,0,0]`, selects it for the move gizmo, and persists its position, title, description, colour and
+`PRIVATE`/`PUBLIC` visibility. Marker locations update in place while dragging, then save through the existing
+revision queue. A durable global marker scale defaults to `10` and is applied in owner and shared viewers. The viewer
+renders each annotation as a labelled, camera-facing 3D circle; clicking it opens the annotation overlay.
+The label sprite and radial outline shader render without depth testing at a high render order, so they remain
+right-side-up and visible on top of splats.
+Each annotation also persists an inspector-editable X/Y label offset, defaulting to `[16, -8, 0]` screen pixels from
+the circle. Labels are DOM overlays projected from the annotation's 3D world position, so they stay upright as the
+camera moves; Z is always zero.
+Numeric annotation settings update the local viewer as values change and persist once the corresponding field loses
+focus; marker dragging keeps its short debounced persistence.
+The editor's top-row environment, building, sky and annotation visibility controls are viewer-only and never persist.
+The durable sky-visibility setting is in Lighting and continues to control shared viewers.
+Opening Assets detaches the transform gizmo; it is restored when returning to an editing inspector tab.
+Shared viewers also offer the same four viewer-local visibility controls; they cannot override share permissions or
+persist changes.
+
+Public manifests filter out private annotations (and all annotations when a share link disables them). A visitor can
+submit a bounded anonymous comment only against a public annotation through a currently valid share token. Comments
+are stored separately, never exposed in public manifests, and are shown to the owner in the Annotations tab. The
+project dashboard shows an unread-comment notice; visiting the owner comment list acknowledges it.
+
+Verified: `pnpm run build`, `pnpm run test`. Manual acceptance: create a private and public annotation, move both,
+reload the editor, verify only the public one appears in a share link, submit a comment, then confirm the dashboard
+notice and owner comment list.

@@ -1,6 +1,7 @@
 import { migrateViewerSettings } from '@gaussian-viewer/contracts';
 import type {
   AssetKind,
+  AnnotationComment,
   AssetRecord,
   AssetState,
   CreateProjectInput,
@@ -10,6 +11,7 @@ import type {
   ProjectSettingsInput,
   ProjectSummary,
   SceneVariant,
+  SceneAnnotation,
   SceneUpdateInput,
   ShareLink,
   SharePermissions,
@@ -48,6 +50,8 @@ interface MongoSceneDocument {
   variants: SceneVariant[];
   viewerSettings?: unknown;
   defaultCamera: DefaultCamera | null;
+  annotations?: SceneAnnotation[];
+  annotationScale?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -97,6 +101,16 @@ interface MongoShareLinkDocument {
   updatedAt: Date;
 }
 
+interface MongoAnnotationCommentDocument {
+  _id: ObjectId;
+  projectId: ObjectId;
+  annotationId: string;
+  shareLinkId: ObjectId;
+  body: string;
+  createdAt: Date;
+  readAt: Date | null;
+}
+
 export interface UserRepository {
   upsertFirebaseUser(user: FirebaseUser): Promise<LocalUser>;
 }
@@ -122,6 +136,8 @@ export interface SceneRecord {
   variants: SceneVariant[];
   viewerSettings: ViewerSettings;
   defaultCamera: DefaultCamera | null;
+  annotations: SceneAnnotation[];
+  annotationScale: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -129,6 +145,17 @@ export interface SceneRecord {
 export interface SceneRepository {
   getScene(projectId: string): Promise<SceneRecord | null>;
   updateScene(projectId: string, input: SceneUpdateInput): Promise<SceneRecord | 'STALE' | null>;
+}
+
+export interface AnnotationCommentRepository {
+  createComment(input: {
+    projectId: string;
+    annotationId: string;
+    shareLinkId: string;
+    body: string;
+  }): Promise<AnnotationComment | null>;
+  listProjectComments(projectId: string): Promise<AnnotationComment[]>;
+  markProjectCommentsRead(projectId: string): Promise<void>;
 }
 
 export interface NewAsset {
@@ -208,6 +235,7 @@ export interface DatabaseRepositories {
   assets: AssetRepository;
   uploadSessions: UploadSessionRepository;
   shares: ShareLinkRepository;
+  annotationComments: AnnotationCommentRepository;
   ping(): Promise<void>;
   close(): Promise<void>;
 }
@@ -222,6 +250,7 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
         assets: Collection<MongoAssetDocument>;
         uploadSessions: Collection<MongoUploadSessionDocument>;
         shares: Collection<MongoShareLinkDocument>;
+        annotationComments: Collection<MongoAnnotationCommentDocument>;
       }>
     | undefined;
 
@@ -235,6 +264,8 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
       const assets = database.collection<MongoAssetDocument>('assets');
       const uploadSessions = database.collection<MongoUploadSessionDocument>('upload_sessions');
       const shares = database.collection<MongoShareLinkDocument>('share_links');
+      const annotationComments =
+        database.collection<MongoAnnotationCommentDocument>('annotation_comments');
       await Promise.all([
         users.createIndex({ firebaseUid: 1 }, { unique: true }),
         projects.createIndex({ ownerFirebaseUid: 1, archivedAt: 1, updatedAt: -1 }),
@@ -246,8 +277,10 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
         shares.createIndex({ tokenHash: 1 }, { unique: true }),
         shares.createIndex({ projectId: 1, createdAt: -1 }),
         shares.createIndex({ enabled: 1, revokedAt: 1, expiresAt: 1 }),
+        annotationComments.createIndex({ projectId: 1, readAt: 1, createdAt: -1 }),
+        annotationComments.createIndex({ annotationId: 1, createdAt: -1 }),
       ]);
-      return { users, projects, scenes, assets, uploadSessions, shares };
+      return { users, projects, scenes, assets, uploadSessions, shares, annotationComments };
     })();
     return collections;
   }
@@ -275,7 +308,7 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
     },
     projects: {
       async listOwnedProjects(ownerFirebaseUid) {
-        const { projects, assets } = await getCollections();
+        const { projects, assets, annotationComments } = await getCollections();
         const stored = await projects
           .find({ ownerFirebaseUid, archivedAt: null })
           .sort({ updatedAt: -1 })
@@ -292,8 +325,23 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
           const key = asset.projectId.toHexString();
           assetsByProject.set(key, [...(assetsByProject.get(key) ?? []), asset]);
         }
+        const unreadCounts = projectIds.length
+          ? await annotationComments
+              .aggregate<{ _id: ObjectId; count: number }>([
+                { $match: { projectId: { $in: projectIds }, readAt: null } },
+                { $group: { _id: '$projectId', count: { $sum: 1 } } },
+              ])
+              .toArray()
+          : [];
+        const unreadByProject = new Map(
+          unreadCounts.map((count) => [count._id.toHexString(), count.count]),
+        );
         return stored.map((project) =>
-          toProjectSummary(project, assetsByProject.get(project._id.toHexString()) ?? []),
+          toProjectSummary(
+            project,
+            assetsByProject.get(project._id.toHexString()) ?? [],
+            unreadByProject.get(project._id.toHexString()) ?? 0,
+          ),
         );
       },
       async createProject(ownerFirebaseUid, input) {
@@ -332,6 +380,8 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
             },
           },
           defaultCamera: null,
+          annotations: [],
+          annotationScale: 10,
           createdAt: now,
           updatedAt: now,
         });
@@ -379,11 +429,12 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
         if (!objectId) {
           return false;
         }
-        const { projects, scenes, shares } = await getCollections();
+        const { projects, scenes, shares, annotationComments } = await getCollections();
         const deleted = await projects.deleteOne({ _id: objectId });
         if (deleted.deletedCount === 1) {
           await scenes.deleteMany({ projectId: objectId });
           await shares.deleteMany({ projectId: objectId });
+          await annotationComments.deleteMany({ projectId: objectId });
           return true;
         }
         return false;
@@ -435,6 +486,8 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
               variants: input.variants,
               viewerSettings: input.viewerSettings,
               defaultCamera: input.defaultCamera,
+              annotations: input.annotations,
+              annotationScale: input.annotationScale,
               updatedAt: new Date(),
             },
             $inc: { revision: 1 },
@@ -609,6 +662,43 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
         return stored ? toShareLink(stored) : null;
       },
     },
+    annotationComments: {
+      async createComment(input) {
+        const projectId = toObjectId(input.projectId);
+        const shareLinkId = toObjectId(input.shareLinkId);
+        if (!projectId || !shareLinkId) return null;
+        const { annotationComments } = await getCollections();
+        const now = new Date();
+        const stored: MongoAnnotationCommentDocument = {
+          _id: new ObjectId(),
+          projectId,
+          annotationId: input.annotationId,
+          shareLinkId,
+          body: input.body,
+          createdAt: now,
+          readAt: null,
+        };
+        await annotationComments.insertOne(stored);
+        return toAnnotationComment(stored);
+      },
+      async listProjectComments(projectId) {
+        const objectId = toObjectId(projectId);
+        if (!objectId) return [];
+        const { annotationComments } = await getCollections();
+        return (
+          await annotationComments.find({ projectId: objectId }).sort({ createdAt: -1 }).toArray()
+        ).map(toAnnotationComment);
+      },
+      async markProjectCommentsRead(projectId) {
+        const objectId = toObjectId(projectId);
+        if (!objectId) return;
+        const { annotationComments } = await getCollections();
+        await annotationComments.updateMany(
+          { projectId: objectId, readAt: null },
+          { $set: { readAt: new Date() } },
+        );
+      },
+    },
     uploadSessions: {
       async createUploadSession(input) {
         const assetId = toObjectId(input.assetId);
@@ -703,6 +793,7 @@ function toLocalUser(document: MongoUserDocument): LocalUser {
 function toProjectSummary(
   document: MongoProjectDocument,
   assets: MongoAssetDocument[] = [],
+  unreadAnnotationCommentCount = 0,
 ): ProjectSummary {
   return {
     id: document._id.toHexString(),
@@ -718,6 +809,7 @@ function toProjectSummary(
     createdAt: document.createdAt.toISOString(),
     updatedAt: document.updatedAt.toISOString(),
     archivedAt: document.archivedAt?.toISOString() ?? null,
+    unreadAnnotationCommentCount,
     assets: assets.map((asset) => ({
       id: asset._id.toHexString(),
       filename: asset.filename,
@@ -743,8 +835,32 @@ function toSceneRecord(document: MongoSceneDocument): SceneRecord {
     variants: document.variants ?? [],
     viewerSettings: migrateViewerSettings(document.viewerSettings),
     defaultCamera: document.defaultCamera ?? null,
+    annotations: (document.annotations ?? []).map((annotation) => {
+      const offsetX = annotation.labelOffset?.[0] ?? 16;
+      const offsetY = annotation.labelOffset?.[1] ?? -8;
+      const isLegacyWorldOffset = Math.abs(offsetX) <= 1 && Math.abs(offsetY) <= 1;
+      return {
+        ...annotation,
+        labelOffset: [
+          isLegacyWorldOffset ? offsetX * 100 : offsetX,
+          isLegacyWorldOffset ? offsetY * 100 : offsetY,
+          0,
+        ],
+      };
+    }),
+    annotationScale: document.annotationScale ?? 10,
     createdAt: document.createdAt.toISOString(),
     updatedAt: document.updatedAt.toISOString(),
+  };
+}
+
+function toAnnotationComment(document: MongoAnnotationCommentDocument): AnnotationComment {
+  return {
+    id: document._id.toHexString(),
+    annotationId: document.annotationId,
+    body: document.body,
+    createdAt: document.createdAt.toISOString(),
+    readAt: document.readAt?.toISOString() ?? null,
   };
 }
 

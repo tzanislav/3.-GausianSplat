@@ -27,6 +27,7 @@ const app = createApp({
   assets: database.assets,
   uploadSessions: database.uploadSessions,
   shares: database.shares,
+  annotationComments: database.annotationComments,
   storage: createS3AssetStorage(storageEnvironment),
 });
 

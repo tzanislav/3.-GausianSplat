@@ -115,6 +115,12 @@ export function ProjectsDashboardPage() {
             </div>
             <div className="project-card__body">
               <h2>{project.name}</h2>
+              {project.unreadAnnotationCommentCount > 0 ? (
+                <p className="project-card__comment-notice" role="status">
+                  New investor comment{project.unreadAnnotationCommentCount === 1 ? '' : 's'}:{' '}
+                  {project.unreadAnnotationCommentCount}
+                </p>
+              ) : null}
               <p>Modified {formatDate(project.updatedAt)}</p>
               <ul className="project-card__assets" aria-label="Project files">
                 {project.assets.length ? (

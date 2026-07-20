@@ -1,6 +1,7 @@
 import type { TokenVerifier } from '@gaussian-viewer/auth';
 import {
   CreateShareLinkInputSchema,
+  CreateAnnotationCommentInputSchema,
   CreateAssetUploadInputSchema,
   CreateMultipartUploadInputSchema,
   MultipartPartUrlInputSchema,
@@ -22,6 +23,7 @@ import type {
   AssetRepository,
   ProjectRepository,
   SceneRepository,
+  AnnotationCommentRepository,
   SceneRecord,
   ShareLinkRepository,
   UploadSessionRepository,
@@ -50,6 +52,7 @@ export interface AppDependencies {
   assets?: AssetRepository;
   uploadSessions?: UploadSessionRepository;
   shares?: ShareLinkRepository;
+  annotationComments?: AnnotationCommentRepository;
   storage?: AssetStorage;
 }
 
@@ -104,6 +107,52 @@ export function createApp(dependencies: AppDependencies = {}): Express {
       next(error);
     }
   });
+
+  app.post(
+    '/public/shares/:token/annotations/:annotationId/comments',
+    async (request, response, next) => {
+      try {
+        const token = projectIdFrom(request.params.token);
+        const annotationId = projectIdFrom(request.params.annotationId);
+        const input = CreateAnnotationCommentInputSchema.safeParse(request.body);
+        if (!isShareToken(token) || !annotationId || !input.success) {
+          response.status(404).json({ error: 'Share link not found.' });
+          return;
+        }
+        const shares = requireShares(dependencies, response);
+        const scenes = requireScenes(dependencies, response);
+        const comments = requireAnnotationComments(dependencies, response);
+        if (!shares || !scenes || !comments) return;
+        const link = await shares.getActiveShareLinkByTokenHash(hashShareToken(token), new Date());
+        if (!link || !link.permissions.showAnnotations) {
+          response.status(404).json({ error: 'Share link not found.' });
+          return;
+        }
+        const scene = await scenes.getScene(link.projectId);
+        const annotation = scene?.annotations.find(
+          (candidate) => candidate.id === annotationId && candidate.visibility === 'PUBLIC',
+        );
+        if (!annotation) {
+          response.status(404).json({ error: 'Share link not found.' });
+          return;
+        }
+        const comment = await comments.createComment({
+          projectId: link.projectId,
+          annotationId,
+          shareLinkId: link.id,
+          body: input.data.body,
+        });
+        if (!comment) {
+          response.status(409).json({ error: 'The comment could not be saved.' });
+          return;
+        }
+        response.set({ 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
+        response.status(201).json({ createdAt: comment.createdAt });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
   const requireAuthentication: RequestHandler = async (request, response, next) => {
     if (!dependencies.tokenVerifier || !dependencies.users) {
@@ -369,6 +418,45 @@ export function createApp(dependencies: AppDependencies = {}): Express {
           return;
         }
         response.status(200).json(await toOwnerManifest(scene, assets, storage));
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.get(
+    '/projects/:projectId/annotation-comments',
+    requireAuthentication,
+    async (request, response, next) => {
+      try {
+        const project = await getOwnedProject(
+          dependencies,
+          response,
+          projectIdFrom(request.params.projectId),
+        );
+        const comments = requireAnnotationComments(dependencies, response);
+        if (!project || !comments) return;
+        response.status(200).json(await comments.listProjectComments(project.id));
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.post(
+    '/projects/:projectId/annotation-comments/acknowledge',
+    requireAuthentication,
+    async (request, response, next) => {
+      try {
+        const project = await getOwnedProject(
+          dependencies,
+          response,
+          projectIdFrom(request.params.projectId),
+        );
+        const comments = requireAnnotationComments(dependencies, response);
+        if (!project || !comments) return;
+        await comments.markProjectCommentsRead(project.id);
+        response.status(204).end();
       } catch (error) {
         next(error);
       }
@@ -1216,6 +1304,15 @@ function requireShares(
   return undefined;
 }
 
+function requireAnnotationComments(
+  dependencies: AppDependencies,
+  response: Response,
+): AnnotationCommentRepository | undefined {
+  if (dependencies.annotationComments) return dependencies.annotationComments;
+  response.status(503).json({ error: 'Annotation comments are not configured.' });
+  return undefined;
+}
+
 async function withProjectCoverUrls(
   projects: ProjectSummary[],
   repository: ProjectRepository,
@@ -1379,7 +1476,8 @@ async function toOwnerManifest(scene: SceneRecord, assets: AssetRepository, stor
     variants: variants.filter((variant) => variant !== undefined),
     viewerSettings: scene.viewerSettings,
     defaultCamera: scene.defaultCamera,
-    annotations: [],
+    annotations: scene.annotations,
+    annotationScale: scene.annotationScale,
   };
 }
 
@@ -1424,8 +1522,10 @@ async function toPublicManifest(
     variants: variants.filter((variant) => variant !== undefined),
     viewerSettings: scene.viewerSettings,
     defaultCamera: scene.defaultCamera,
-    // Phase 11 owns annotation persistence; no owner-only values can leak before then.
-    annotations: [],
+    annotations: permissions.showAnnotations
+      ? scene.annotations.filter((annotation) => annotation.visibility === 'PUBLIC')
+      : [],
+    annotationScale: scene.annotationScale,
   };
 }
 

@@ -6,17 +6,18 @@
 
 ## Initial endpoint plan
 
-| Phase | Endpoint family                   | Purpose                                                   |
-| ----- | --------------------------------- | --------------------------------------------------------- |
-| 1     | `GET /health`                     | Process health check                                      |
-| 3     | `/auth` middleware                | Firebase ID-token verification                            |
-| 4     | `/projects`                       | Owner project CRUD                                        |
-| 5–6   | `/assets`, `/uploads`             | Presigned and multipart asset upload workflows            |
-| 7     | `/projects/{id}/manifest`         | Authenticated scene reconstruction                        |
-| 7     | `/scenes/{id}`                    | Revision-checked scene updates, including `defaultCamera` |
-| 7     | `/projects/{id}/cover`            | Owner-only WebP project-cover upload and verification     |
-| 8     | `/projects/{id}/scene`            | Revision-checked environment and first-building placement |
-| 10    | `/public/shares/{token}/manifest` | Sanitized anonymous read-only viewing                     |
+| Phase | Endpoint family                        | Purpose                                                   |
+| ----- | -------------------------------------- | --------------------------------------------------------- |
+| 1     | `GET /health`                          | Process health check                                      |
+| 3     | `/auth` middleware                     | Firebase ID-token verification                            |
+| 4     | `/projects`                            | Owner project CRUD                                        |
+| 5–6   | `/assets`, `/uploads`                  | Presigned and multipart asset upload workflows            |
+| 7     | `/projects/{id}/manifest`              | Authenticated scene reconstruction                        |
+| 7     | `/scenes/{id}`                         | Revision-checked scene updates, including `defaultCamera` |
+| 7     | `/projects/{id}/cover`                 | Owner-only WebP project-cover upload and verification     |
+| 8     | `/projects/{id}/scene`                 | Revision-checked environment and first-building placement |
+| 10    | `/public/shares/{token}/manifest`      | Sanitized anonymous read-only viewing                     |
+| 11    | `/annotations`, `/annotation-comments` | Durable presentation markers and investor feedback        |
 
 ## Phase 8 owner scene updates
 
@@ -72,3 +73,17 @@ only from creation or regeneration; MongoDB stores a SHA-256 hash, never the tok
 The public route returns `404` for missing, disabled, revoked and expired links. It sends `Cache-Control: no-store`,
 `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex, nofollow, noarchive`. Any asset URL in a successful public
 manifest is a five-minute S3 presigned URL.
+
+## Phase 11 annotation endpoints
+
+Annotations are part of the revision-checked `PUT /projects/{projectId}/scene` payload. Owner manifests include
+all annotations; public manifests include only `PUBLIC` annotations and only when the share link's
+`showAnnotations` permission is enabled. Investor comments are deliberately not part of a public manifest.
+
+| Endpoint                                                          | Purpose                                                                           |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `POST /public/shares/{token}/annotations/{annotationId}/comments` | Submit a bounded anonymous comment to an enabled link's public annotation.        |
+| `GET /projects/{projectId}/annotation-comments`                   | Owner-only list of investor comments.                                             |
+| `POST /projects/{projectId}/annotation-comments/acknowledge`      | Owner-only acknowledgement that marks the project's outstanding comments as read. |
+
+The public comment endpoint returns the same `404` for an invalid/disabled link and an inaccessible annotation.

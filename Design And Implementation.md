@@ -736,24 +736,27 @@ state remain Phase 11 work.
 
 **Goal:** Turn the viewer into a controlled presentation.
 
+**Status:** Complete — durable, revision-checked annotations, private/public presentation filtering and
+owner-visible investor comments are implemented. Live browser acceptance remains for real project assets.
+
 ### Steps
 
-1. Add annotation points. (Small circle pinned in 3d spcace with text that when clicked opens a small text overlay with additional information)
-2. Add a comment box to the additional information box where the investor can post a comment to the annotation
-2.1 Add a little icon to the project card notifing the creator that there is a new investor comment.
-5. Annotation flow:
+1. Add annotation points. (Complete: labelled 3D circles open a title/description overlay.)
+2. Add a comment box to the additional information box where the investor can post a comment to the annotation. (Complete.)
+2.1 Add a little icon to the project card notifing the creator that there is a new investor comment. (Complete.)
+5. Annotation flow: (Complete.)
         a. Button "Add Annotation" (adds a new annotation to the scene at 0,0,0)
         b. Adds the annotation to the drop down with object to transform and selects it
         c. Locations of all annotation are stored in the project
-5. Add annotation titles and descriptions.
-6. Add annotation visibility rules. (Show/Hide in editor and investor viewer)
+5. Add annotation titles and descriptions. (Complete.)
+6. Add annotation visibility rules. (Complete: private annotations never enter a public manifest.)
 
 
 ### Acceptance
 
 * Annotations remain correctly positioned after reload.
-*
 * Internal annotations can be excluded from sharing.
+
 
 ---
 

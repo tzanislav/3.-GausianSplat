@@ -4,6 +4,7 @@ import type {
   AssetKind as StoredAssetKind,
   AssetRecord,
   AssetUploadTicket,
+  AnnotationComment,
   DefaultCamera,
   MultipartPartUrlTicket,
   OwnerSceneManifest,
@@ -12,6 +13,7 @@ import type {
   PublicShareManifest,
   ProjectSummary,
   SceneVariant,
+  SceneAnnotation,
   ShareLink,
   SharePermissions,
   Transform,
@@ -24,15 +26,24 @@ import {
   getTransformEulerDegrees,
   setTransformEulerDegrees,
   type AssetKind,
+  type AnnotationScreenPosition,
   type TransformGizmoMode,
   type ViewerState,
 } from '@gaussian-viewer/viewer-core';
 import { AuthProvider, useAuth } from '../../auth.js';
+import { SceneLoadingOverlay } from '../viewer/SceneLoadingOverlay.js';
 
 type Vector3 = [number, number, number];
 type NudgeSpeed = 'slow' | 'fast';
 type EditableAssetKind = Extract<AssetKind, 'environment' | 'building'>;
 type InspectorTab = 'assets' | 'layouts' | 'lighting' | 'annotations';
+type AnnotationPersistence = 'immediate' | 'debounced' | 'local';
+type EditorVisibility = {
+  environment: boolean;
+  building: boolean;
+  sky: boolean;
+  annotations: boolean;
+};
 
 interface TransformSnapshot {
   environment: Transform;
@@ -1249,7 +1260,17 @@ function PersistentProjectViewer({
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const conflictRef = useRef(false);
   const [manifest, setManifest] = useState<OwnerSceneManifest | null>(null);
+  const [annotationLabelPositions, setAnnotationLabelPositions] = useState<
+    AnnotationScreenPosition[]
+  >([]);
+  const [editorVisibility, setEditorVisibility] = useState<EditorVisibility>({
+    environment: true,
+    building: true,
+    sky: true,
+    annotations: true,
+  });
   const [error, setError] = useState<string | null>(null);
+  const [isSceneLoading, setIsSceneLoading] = useState(true);
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [sceneConflict, setSceneConflict] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -1266,11 +1287,10 @@ function PersistentProjectViewer({
   const [sunRotation, setSunRotation] = useState<Vector3>([0, 0, 0]);
   const [ambientPower, setAmbientPower] = useState(1.8);
   const [ambientColor, setAmbientColor] = useState('#ffffff');
-  const [draftAnnotations, setDraftAnnotations] = useState<
-    { id: string; title: string; description: string; color: string }[]
-  >([]);
-  const [selectedDraftAnnotationId, setSelectedDraftAnnotationId] = useState<string | undefined>();
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | undefined>();
+  const [annotationComments, setAnnotationComments] = useState<AnnotationComment[]>([]);
   const transformSaveTimerRef = useRef<number | undefined>(undefined);
+  const annotationSaveTimerRef = useRef<number | undefined>(undefined);
   const cameraSaveTimerRef = useRef<number | undefined>(undefined);
   const undoStackRef = useRef<TransformSnapshot[]>([]);
   const initialTransformsRef = useRef<TransformSnapshot | null>(null);
@@ -1290,9 +1310,13 @@ function PersistentProjectViewer({
       onTransformStart: () => recordTransformHistory(),
       onTransformChange: (kind, transform) => updateTransform(kind, transform, false),
       onSunRotationChange: (rotationDegrees) => updateSunSettings({ rotationDegrees }),
+      onAnnotationClick: (annotationId) => selectAnnotation(annotationId),
+      onAnnotationTransformChange: (annotationId, position) =>
+        updateAnnotation(annotationId, { position }, 'debounced'),
     });
     viewer.selectAsset(editingKind);
     viewer.setTransformGizmoMode(gizmoMode);
+    viewer.setTransformGizmoVisible(false);
     viewer.setProxyGroundVisible(proxyGroundVisibleRef.current);
     viewerRef.current = viewer;
     return () => {
@@ -1301,9 +1325,27 @@ function PersistentProjectViewer({
       if (transformSaveTimerRef.current !== undefined) {
         window.clearTimeout(transformSaveTimerRef.current);
       }
+      if (annotationSaveTimerRef.current !== undefined) {
+        window.clearTimeout(annotationSaveTimerRef.current);
+      }
       if (cameraSaveTimerRef.current !== undefined) {
         window.clearTimeout(cameraSaveTimerRef.current);
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    let frame = 0;
+    let active = true;
+    const update = () => {
+      if (!active) return;
+      setAnnotationLabelPositions(viewerRef.current?.getAnnotationScreenPositions() ?? []);
+      frame = window.requestAnimationFrame(update);
+    };
+    frame = window.requestAnimationFrame(update);
+    return () => {
+      active = false;
+      window.cancelAnimationFrame(frame);
     };
   }, []);
 
@@ -1312,6 +1354,7 @@ function PersistentProjectViewer({
     let active = true;
     void (async () => {
       try {
+        setIsSceneLoading(true);
         const response = await auth.authenticatedFetch(`/api/projects/${projectId}/manifest`);
         if (!response.ok) throw new Error('The project scene could not be loaded.');
         const loaded = (await response.json()) as OwnerSceneManifest;
@@ -1324,6 +1367,7 @@ function PersistentProjectViewer({
         viewer.setSunRotation(loaded.viewerSettings.lighting.sun.rotationDegrees);
         viewer.setAmbientPower(loaded.viewerSettings.lighting.ambient.power);
         viewer.setAmbientColor(loaded.viewerSettings.lighting.ambient.color);
+        viewer.setAnnotations(loaded.annotations, loaded.annotationScale);
         viewer.clearAsset('environment');
         viewer.clearAsset('building');
         if (loaded.environment) {
@@ -1351,6 +1395,7 @@ function PersistentProjectViewer({
           'building',
           Boolean(building?.visible) && loaded.viewerSettings.buildingVisible,
         );
+        viewer.setAnnotationsVisible(true);
         if (loaded.defaultCamera) viewer.setCamera(loaded.defaultCamera);
         serverManifestRef.current = loaded;
         manifestRef.current = loaded;
@@ -1367,10 +1412,18 @@ function PersistentProjectViewer({
         setAmbientPower(loaded.viewerSettings.lighting.ambient.power);
         setAmbientColor(loaded.viewerSettings.lighting.ambient.color);
         setSettingsDirty(false);
+        setEditorVisibility({
+          environment: loaded.viewerSettings.environmentVisible,
+          building: Boolean(building?.visible) && loaded.viewerSettings.buildingVisible,
+          sky: loaded.viewerSettings.sky.visible,
+          annotations: true,
+        });
         setSceneConflict(false);
         setError(null);
       } catch (loadError) {
         if (active) setError(messageFor(loadError));
+      } finally {
+        if (active) setIsSceneLoading(false);
       }
     })();
     return () => {
@@ -1382,6 +1435,8 @@ function PersistentProjectViewer({
     environmentAssetId?: string | null;
     environmentTransform?: OwnerSceneManifest['environmentTransform'];
     variants?: SceneVariant[];
+    annotations?: SceneAnnotation[];
+    annotationScale?: number;
     viewerSettings?: ViewerSettings;
     defaultCamera?: DefaultCamera | null;
   }): Promise<boolean> {
@@ -1405,6 +1460,8 @@ function PersistentProjectViewer({
             viewerSettings: update.viewerSettings ?? base.viewerSettings,
             defaultCamera:
               update.defaultCamera === undefined ? base.defaultCamera : update.defaultCamera,
+            annotations: update.annotations ?? base.annotations,
+            annotationScale: update.annotationScale ?? base.annotationScale,
           }),
         });
         if (response.status === 409) {
@@ -1424,6 +1481,8 @@ function PersistentProjectViewer({
               environmentTransform: local.environmentTransform,
               variants: local.variants,
               viewerSettings: desiredViewerSettingsRef.current ?? saved.viewerSettings,
+              annotations: update.annotations ?? local.annotations,
+              annotationScale: update.annotationScale ?? local.annotationScale,
             }
           : saved;
         manifestRef.current = optimistic;
@@ -1509,29 +1568,22 @@ function PersistentProjectViewer({
     return () => window.clearTimeout(timeout);
   }, [manifest, settingsDirty]);
 
-  function updateVisibility(kind: 'environment' | 'building', visible: boolean) {
-    const current = manifestRef.current;
-    if (!current || conflictRef.current) return;
-    viewerRef.current?.setVisible(kind, visible);
-    const updated = {
-      ...current,
-      viewerSettings: {
-        ...current.viewerSettings,
-        [kind === 'environment' ? 'environmentVisible' : 'buildingVisible']: visible,
-      },
-    };
-    manifestRef.current = updated;
-    desiredViewerSettingsRef.current = updated.viewerSettings;
-    setManifest(updated);
-    settingsDirtyRef.current = true;
-    setSettingsDirty(true);
+  function updateEditorVisibility(kind: keyof EditorVisibility, visible: boolean) {
+    setEditorVisibility((current) => ({ ...current, [kind]: visible }));
+    if (kind === 'annotations') {
+      viewerRef.current?.setAnnotationsVisible(visible);
+    } else if (kind === 'sky') {
+      viewerRef.current?.setSkyVisible(visible);
+    } else {
+      viewerRef.current?.setVisible(kind, visible);
+    }
   }
 
   function updateSkySettings(update: Partial<ViewerSettings['sky']>) {
     const current = manifestRef.current;
     if (!current || conflictRef.current) return;
     const sky = { ...current.viewerSettings.sky, ...update };
-    if (update.visible !== undefined) viewerRef.current?.setSkyVisible(update.visible);
+    if (update.visible !== undefined) updateEditorVisibility('sky', update.visible);
     if (update.rotationYDegrees !== undefined) {
       viewerRef.current?.setSkyRotation(update.rotationYDegrees);
     }
@@ -1697,6 +1749,140 @@ function PersistentProjectViewer({
     viewerRef.current?.selectAsset(kind);
   }
 
+  function selectAnnotation(annotationId: string | undefined): void {
+    setSelectedAnnotationId(annotationId);
+    if (annotationId) {
+      setEditingKind(undefined);
+      setGizmoMode('translate');
+      viewerRef.current?.selectAnnotation(annotationId);
+      viewerRef.current?.setTransformGizmoMode('translate');
+    } else {
+      viewerRef.current?.selectAsset(editingKind);
+    }
+  }
+
+  function updateAnnotation(
+    annotationId: string,
+    changes: Partial<SceneAnnotation>,
+    persistence: AnnotationPersistence = 'immediate',
+  ): void {
+    const current = manifestRef.current;
+    if (!current || conflictRef.current) return;
+    const annotations = current.annotations.map((annotation) =>
+      annotation.id === annotationId ? { ...annotation, ...changes } : annotation,
+    );
+    const updated = { ...current, annotations };
+    manifestRef.current = updated;
+    if (changes.position && Object.keys(changes).length === 1) {
+      viewerRef.current?.setAnnotationPosition(annotationId, changes.position);
+    } else {
+      viewerRef.current?.setAnnotations(annotations, current.annotationScale);
+      viewerRef.current?.selectAnnotation(selectedAnnotationId);
+    }
+    setManifest(updated);
+    if (persistence === 'immediate') {
+      void enqueueSceneUpdate({ annotations });
+      return;
+    }
+    if (persistence === 'local') {
+      if (annotationSaveTimerRef.current !== undefined) {
+        window.clearTimeout(annotationSaveTimerRef.current);
+        annotationSaveTimerRef.current = undefined;
+      }
+      return;
+    }
+    if (annotationSaveTimerRef.current !== undefined) {
+      window.clearTimeout(annotationSaveTimerRef.current);
+    }
+    annotationSaveTimerRef.current = window.setTimeout(() => {
+      annotationSaveTimerRef.current = undefined;
+      const pending = manifestRef.current;
+      if (pending) void enqueueSceneUpdate({ annotations: pending.annotations });
+    }, 500);
+  }
+
+  function updateAnnotationScale(annotationScale: number, persist = true): void {
+    const current = manifestRef.current;
+    if (
+      !current ||
+      conflictRef.current ||
+      !Number.isFinite(annotationScale) ||
+      annotationScale <= 0
+    ) {
+      return;
+    }
+    const updated = { ...current, annotationScale };
+    manifestRef.current = updated;
+    viewerRef.current?.setAnnotationScale(annotationScale);
+    setManifest(updated);
+    if (persist) void enqueueSceneUpdate({ annotationScale });
+  }
+
+  function saveAnnotations(): void {
+    const current = manifestRef.current;
+    if (current && !conflictRef.current) {
+      void enqueueSceneUpdate({ annotations: current.annotations });
+    }
+  }
+
+  function saveAnnotationScale(): void {
+    const current = manifestRef.current;
+    if (current && !conflictRef.current) {
+      void enqueueSceneUpdate({ annotationScale: current.annotationScale });
+    }
+  }
+
+  function addAnnotation(): void {
+    const current = manifestRef.current;
+    if (!current || conflictRef.current) return;
+    const annotation: SceneAnnotation = {
+      id: crypto.randomUUID(),
+      position: [0, 0, 0],
+      title: 'New annotation',
+      description: '',
+      color: '#78b8f6',
+      labelOffset: [16, -8, 0],
+      visibility: 'PRIVATE',
+    };
+    const annotations = [...current.annotations, annotation];
+    const updated = { ...current, annotations };
+    manifestRef.current = updated;
+    viewerRef.current?.setAnnotations(annotations, current.annotationScale);
+    setManifest(updated);
+    setSelectedAnnotationId(annotation.id);
+    setEditingKind(undefined);
+    viewerRef.current?.selectAnnotation(annotation.id);
+    void enqueueSceneUpdate({ annotations });
+  }
+
+  function deleteAnnotation(annotationId: string): void {
+    const current = manifestRef.current;
+    if (!current || conflictRef.current) return;
+    const annotations = current.annotations.filter((annotation) => annotation.id !== annotationId);
+    const updated = { ...current, annotations };
+    manifestRef.current = updated;
+    viewerRef.current?.setAnnotations(annotations, current.annotationScale);
+    setSelectedAnnotationId(undefined);
+    viewerRef.current?.selectAsset(editingKind);
+    setManifest(updated);
+    void enqueueSceneUpdate({ annotations });
+  }
+
+  async function loadAnnotationComments(): Promise<void> {
+    try {
+      const response = await auth.authenticatedFetch(
+        `/api/projects/${projectId}/annotation-comments`,
+      );
+      if (!response.ok) throw new Error('Investor comments could not be loaded.');
+      setAnnotationComments((await response.json()) as AnnotationComment[]);
+      await auth.authenticatedFetch(`/api/projects/${projectId}/annotation-comments/acknowledge`, {
+        method: 'POST',
+      });
+    } catch (loadError) {
+      setError(messageFor(loadError));
+    }
+  }
+
   function changeGizmoMode(mode: TransformGizmoMode): void {
     setGizmoMode(mode);
     viewerRef.current?.setTransformGizmoMode(mode);
@@ -1705,6 +1891,12 @@ function PersistentProjectViewer({
   function changeInspectorTab(tab: InspectorTab): void {
     if (tab === inspectorTab) return;
     const viewer = viewerRef.current;
+
+    if (tab === 'assets') {
+      viewer?.setTransformGizmoVisible(false);
+    } else if (inspectorTab === 'assets') {
+      viewer?.setTransformGizmoVisible(true);
+    }
 
     if (inspectorTab === 'lighting') {
       const previous = selectionBeforeLightingRef.current;
@@ -1723,6 +1915,7 @@ function PersistentProjectViewer({
       setGizmoMode('rotate');
       viewer?.beginSunRotationEdit(sunRotation);
     }
+    if (tab === 'annotations') void loadAnnotationComments();
     setInspectorTab(tab);
   }
 
@@ -1790,25 +1983,31 @@ function PersistentProjectViewer({
   return (
     <section className="project-viewer">
       <div className="project-viewer__actions">
-        <h2>Persistent scene</h2>
+        <h2>Editor visibility</h2>
         <div className="auth-page__actions">
           <Toggle
             label="Environment"
-            checked={manifest?.viewerSettings.environmentVisible ?? true}
-            onChange={(visible) => updateVisibility('environment', visible)}
-            disabled={!manifest || sceneConflict}
+            checked={editorVisibility.environment}
+            onChange={(visible) => updateEditorVisibility('environment', visible)}
+            disabled={!manifest}
           />
           <Toggle
             label="Building"
-            checked={manifest?.viewerSettings.buildingVisible ?? true}
-            onChange={(visible) => updateVisibility('building', visible)}
-            disabled={!manifest || sceneConflict}
+            checked={editorVisibility.building}
+            onChange={(visible) => updateEditorVisibility('building', visible)}
+            disabled={!manifest}
           />
           <Toggle
             label="Sky"
-            checked={manifest?.viewerSettings.sky.visible ?? true}
-            onChange={(visible) => updateSkySettings({ visible })}
-            disabled={!manifest || sceneConflict}
+            checked={editorVisibility.sky}
+            onChange={(visible) => updateEditorVisibility('sky', visible)}
+            disabled={!manifest}
+          />
+          <Toggle
+            label="Annotations"
+            checked={editorVisibility.annotations}
+            onChange={(visible) => updateEditorVisibility('annotations', visible)}
+            disabled={!manifest}
           />
           <button
             className="auth-button"
@@ -1849,7 +2048,7 @@ function PersistentProjectViewer({
                 aria-selected={inspectorTab === tab}
                 onClick={() => changeInspectorTab(tab)}
               >
-                {tab === 'layouts' ? 'Layouts' : tab[0].toUpperCase() + tab.slice(1)}
+                {tab === 'layouts' ? 'Layouts' : tab.charAt(0).toUpperCase() + tab.slice(1)}
               </button>
             ))}
           </div>
@@ -1893,7 +2092,7 @@ function PersistentProjectViewer({
                   Select an object, then drag its move or rotate gizmo. Position is in metres and
                   rotation is Euler XYZ degrees. Transforms save automatically.
                 </p>
-                {selectedTransform ? (
+                {editingKind && selectedTransform ? (
                   <details className="numeric-transform-controls">
                     <summary>Numeric alignment</summary>
                     <TransformControls
@@ -1969,6 +2168,12 @@ function PersistentProjectViewer({
           {inspectorTab === 'lighting' ? (
             <section className="lighting-controls">
               <h2>Lighting</h2>
+              <Toggle
+                label="Show sky in shared viewer"
+                checked={manifest?.viewerSettings.sky.visible ?? true}
+                disabled={!manifest || sceneConflict}
+                onChange={(visible) => updateSkySettings({ visible })}
+              />
               <p className="panel__hint">
                 The rotation gizmo is attached to a center-origin light handle while this tab is
                 open. Your previous object selection is restored when you leave it.
@@ -2051,65 +2256,82 @@ function PersistentProjectViewer({
           {inspectorTab === 'annotations' ? (
             <section className="annotation-controls">
               <h2>Annotations</h2>
-              <label className="speed-select">
-                <span>Object</span>
-                <select
-                  value={editingKind ?? 'none'}
-                  onChange={(event) =>
-                    selectEditingAsset(
-                      event.target.value === 'none'
-                        ? undefined
-                        : (event.target.value as EditableAssetKind),
-                    )
-                  }
-                >
-                  <option value="none">None</option>
-                  <option value="environment">Environment</option>
-                  <option value="building" disabled={!manifest?.variants[0]}>
-                    Building
-                  </option>
-                </select>
+              <label className="transform-controls__row">
+                <span>Global marker scale</span>
+                <input
+                  type="number"
+                  min="0.1"
+                  max="100"
+                  step="0.1"
+                  value={manifest?.annotationScale ?? 10}
+                  disabled={!manifest || sceneConflict}
+                  onChange={(event) => updateAnnotationScale(Number(event.target.value), false)}
+                  onBlur={saveAnnotationScale}
+                />
               </label>
               <button
                 className="auth-button"
                 type="button"
-                onClick={() => {
-                  const id = crypto.randomUUID();
-                  setDraftAnnotations((current) => [
-                    ...current,
-                    { id, title: 'New annotation', description: '', color: '#78b8f6' },
-                  ]);
-                  setSelectedDraftAnnotationId(id);
-                }}
+                disabled={!manifest || sceneConflict}
+                onClick={addAnnotation}
               >
                 Add annotation
               </button>
-              {selectedDraftAnnotationId ? (
+              <label className="speed-select">
+                <span>Annotation</span>
+                <select
+                  value={selectedAnnotationId ?? 'none'}
+                  disabled={!manifest || sceneConflict}
+                  onChange={(event) =>
+                    selectAnnotation(event.target.value === 'none' ? undefined : event.target.value)
+                  }
+                >
+                  <option value="none">Select an annotation</option>
+                  {manifest?.annotations.map((annotation) => (
+                    <option key={annotation.id} value={annotation.id}>
+                      {annotation.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {selectedAnnotationId ? (
                 (() => {
-                  const annotation = draftAnnotations.find(
-                    (candidate) => candidate.id === selectedDraftAnnotationId,
+                  const annotation = manifest?.annotations.find(
+                    (candidate) => candidate.id === selectedAnnotationId,
                   );
                   if (!annotation) return null;
-                  const update = (changes: Partial<typeof annotation>) =>
-                    setDraftAnnotations((current) =>
-                      current.map((candidate) =>
-                        candidate.id === annotation.id ? { ...candidate, ...changes } : candidate,
-                      ),
-                    );
+                  const update = (
+                    changes: Partial<SceneAnnotation>,
+                    persistence: AnnotationPersistence = 'immediate',
+                  ) => updateAnnotation(annotation.id, changes, persistence);
                   return (
                     <>
                       <label className="editor-field">
                         <span>Title</span>
                         <input
-                          value={annotation.title}
-                          onChange={(event) => update({ title: event.target.value })}
+                          key={`${annotation.id}-title`}
+                          defaultValue={annotation.title}
+                          onBlur={(event) => {
+                            const title = event.currentTarget.value.trim();
+                            if (!title) {
+                              event.currentTarget.value = annotation.title;
+                              return;
+                            }
+                            event.currentTarget.value = title;
+                            if (title !== annotation.title) update({ title });
+                          }}
                         />
                       </label>
                       <label className="editor-field">
                         <span>Description</span>
                         <textarea
-                          value={annotation.description}
-                          onChange={(event) => update({ description: event.target.value })}
+                          key={`${annotation.id}-description`}
+                          defaultValue={annotation.description}
+                          onBlur={(event) => {
+                            if (event.currentTarget.value !== annotation.description) {
+                              update({ description: event.currentTarget.value });
+                            }
+                          }}
                         />
                       </label>
                       <label className="color-control">
@@ -2120,15 +2342,45 @@ function PersistentProjectViewer({
                           onChange={(event) => update({ color: event.target.value })}
                         />
                       </label>
+                      <fieldset className="nudge-group">
+                        <legend>Label offset from circle (screen px)</legend>
+                        {(['X', 'Y'] as const).map((axis, index) => (
+                          <label className="transform-controls__row" key={axis}>
+                            <span>{axis}</span>
+                            <input
+                              type="number"
+                              step="1"
+                              value={annotation.labelOffset[index]}
+                              onChange={(event) => {
+                                const value = Number(event.target.value);
+                                if (!Number.isFinite(value)) return;
+                                if (value === annotation.labelOffset[index]) return;
+                                const labelOffset = [...annotation.labelOffset] as [
+                                  number,
+                                  number,
+                                  0,
+                                ];
+                                labelOffset[index] = value;
+                                labelOffset[2] = 0;
+                                update({ labelOffset }, 'local');
+                              }}
+                              onBlur={saveAnnotations}
+                            />
+                          </label>
+                        ))}
+                      </fieldset>
+                      <Toggle
+                        label="Visible to investors"
+                        checked={annotation.visibility === 'PUBLIC'}
+                        disabled={sceneConflict}
+                        onChange={(visible) =>
+                          update({ visibility: visible ? 'PUBLIC' : 'PRIVATE' })
+                        }
+                      />
                       <button
                         className="secondary-button"
                         type="button"
-                        onClick={() => {
-                          setDraftAnnotations((current) =>
-                            current.filter((candidate) => candidate.id !== annotation.id),
-                          );
-                          setSelectedDraftAnnotationId(undefined);
-                        }}
+                        onClick={() => deleteAnnotation(annotation.id)}
                       >
                         Delete annotation
                       </button>
@@ -2136,23 +2388,78 @@ function PersistentProjectViewer({
                   );
                 })()
               ) : (
-                <p className="panel__hint">Add an annotation to edit its draft details.</p>
+                <p className="panel__hint">
+                  Add an annotation to edit its details and move its marker.
+                </p>
               )}
-              <p className="panel__hint">
-                Draft annotations stay in this editor only. Scene markers and persistence are Phase
-                11 work.
-              </p>
+              <h3>Investor comments</h3>
+              {annotationComments.length ? (
+                <ul className="annotation-comments">
+                  {annotationComments.map((comment) => (
+                    <li key={comment.id}>
+                      <strong>
+                        {manifest?.annotations.find(
+                          (annotation) => annotation.id === comment.annotationId,
+                        )?.title ?? 'Deleted annotation'}
+                      </strong>
+                      <p>{comment.body}</p>
+                      <small>{formatDate(comment.createdAt)}</small>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="panel__hint">No investor comments yet.</p>
+              )}
             </section>
           ) : null}
         </aside>
         <section className="viewer-canvas-wrap">
           <canvas ref={canvasRef} className="viewer-canvas" aria-label="Persistent project scene" />
+          {isSceneLoading ? <SceneLoadingOverlay /> : null}
+          <SceneAnnotationLabels
+            annotations={manifest?.annotations ?? []}
+            positions={annotationLabelPositions}
+            visible={editorVisibility.annotations}
+          />
           <p className="viewer-canvas-wrap__help">
             Drag to orbit · scroll to zoom · right-drag to pan
           </p>
         </section>
       </div>
     </section>
+  );
+}
+
+function SceneAnnotationLabels({
+  annotations,
+  positions,
+  visible,
+}: {
+  annotations: SceneAnnotation[];
+  positions: AnnotationScreenPosition[];
+  visible: boolean;
+}) {
+  const positionsById = new Map(positions.map((position) => [position.id, position]));
+  if (!visible) return null;
+  return (
+    <div className="annotation-label-layer" aria-hidden="true">
+      {annotations.map((annotation) => {
+        const position = positionsById.get(annotation.id);
+        if (!position?.visible) return null;
+        return (
+          <span
+            className="annotation-screen-label"
+            key={annotation.id}
+            style={{
+              left: `${position.x + annotation.labelOffset[0]}px`,
+              top: `${position.y + annotation.labelOffset[1]}px`,
+            }}
+          >
+            {annotation.title}
+          </span>
+        );
+      })}
+    </div>
   );
 }
 

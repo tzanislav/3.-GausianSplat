@@ -162,6 +162,7 @@ export const ProjectSummarySchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   archivedAt: z.string().datetime().nullable(),
+  unreadAnnotationCommentCount: z.number().int().nonnegative().default(0),
   assets: z.array(
     z.object({
       id: z.string().min(1),
@@ -251,9 +252,25 @@ export const SceneVariantSchema = z.object({
 export const SceneAnnotationSchema = z.object({
   id: z.string().min(1),
   position: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]),
-  title: z.string().min(1),
-  description: z.string(),
+  title: z.string().trim().min(1).max(120),
+  description: z.string().max(4_000),
+  color: LightColorSchema.default('#78b8f6'),
+  labelOffset: z
+    .tuple([z.number().finite(), z.number().finite(), z.literal(0)])
+    .default([16, -8, 0]),
   visibility: z.enum(['PRIVATE', 'PUBLIC']),
+});
+
+export const CreateAnnotationCommentInputSchema = z.object({
+  body: z.string().trim().min(1).max(2_000),
+});
+
+export const AnnotationCommentSchema = z.object({
+  id: z.string().min(1),
+  annotationId: z.string().min(1),
+  body: z.string().min(1),
+  createdAt: z.string().datetime(),
+  readAt: z.string().datetime().nullable(),
 });
 
 export const SceneUpdateInputSchema = z.object({
@@ -263,6 +280,8 @@ export const SceneUpdateInputSchema = z.object({
   variants: z.array(SceneVariantSchema).max(1),
   viewerSettings: ViewerSettingsSchema,
   defaultCamera: DefaultCameraSchema.nullable(),
+  annotations: z.array(SceneAnnotationSchema).max(100).default([]),
+  annotationScale: z.number().finite().positive().max(100).default(10),
 });
 
 export const SceneManifestSchema = z.object({
@@ -275,6 +294,7 @@ export const SceneManifestSchema = z.object({
   viewerSettings: ViewerSettingsSchema,
   defaultCamera: DefaultCameraSchema.nullable(),
   annotations: z.array(SceneAnnotationSchema),
+  annotationScale: z.number().finite().positive().max(100).default(10),
 });
 
 export const OwnerSceneVariantSchema = SceneVariantSchema.extend({
@@ -346,6 +366,7 @@ export const PublicShareManifestSchema = z.object({
   viewerSettings: ViewerSettingsSchema,
   defaultCamera: DefaultCameraSchema.nullable(),
   annotations: z.array(SceneAnnotationSchema),
+  annotationScale: z.number().finite().positive().max(100).default(10),
 });
 
 export type Transform = z.infer<typeof TransformSchema>;
@@ -376,6 +397,8 @@ export type DefaultCamera = z.infer<typeof DefaultCameraSchema>;
 export type SceneVariant = z.infer<typeof SceneVariantSchema>;
 export type OwnerSceneVariant = z.infer<typeof OwnerSceneVariantSchema>;
 export type SceneAnnotation = z.infer<typeof SceneAnnotationSchema>;
+export type CreateAnnotationCommentInput = z.infer<typeof CreateAnnotationCommentInputSchema>;
+export type AnnotationComment = z.infer<typeof AnnotationCommentSchema>;
 export type SceneUpdateInput = z.infer<typeof SceneUpdateInputSchema>;
 export type SceneManifest = z.infer<typeof SceneManifestSchema>;
 export type OwnerSceneManifest = z.infer<typeof OwnerSceneManifestSchema>;
