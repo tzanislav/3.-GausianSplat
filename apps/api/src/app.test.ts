@@ -12,7 +12,7 @@ import type {
 } from '@gaussian-viewer/database';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { createHash } from 'node:crypto';
-import { createApp } from './app.js';
+import { createApp, hasExpectedMagicBytes } from './app.js';
 import type { AssetStorage } from './storage.js';
 
 let server: Server;
@@ -34,6 +34,18 @@ afterAll(async () => {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });
+});
+
+test('recognizes current and legacy SPZ file signatures', () => {
+  expect(
+    hasExpectedMagicBytes('ENVIRONMENT', 'scene.spz', new Uint8Array([0x4e, 0x47, 0x53, 0x50])),
+  ).toBe(true);
+  expect(hasExpectedMagicBytes('ENVIRONMENT', 'scene.spz', new Uint8Array([0x1f, 0x8b]))).toBe(
+    true,
+  );
+  expect(hasExpectedMagicBytes('ENVIRONMENT', 'scene.spz', new Uint8Array([0x50, 0x4b]))).toBe(
+    false,
+  );
 });
 
 test('GET /health returns the API health payload', async () => {

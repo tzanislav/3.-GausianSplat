@@ -1756,7 +1756,11 @@ function hasWebpMagicBytes(header: Uint8Array): boolean {
   );
 }
 
-function hasExpectedMagicBytes(kind: AssetKind, filename: string, header: Uint8Array): boolean {
+export function hasExpectedMagicBytes(
+  kind: AssetKind,
+  filename: string,
+  header: Uint8Array,
+): boolean {
   if (kind === 'BUILDING') {
     return (
       header.length >= 12 &&
@@ -1775,12 +1779,15 @@ function hasExpectedMagicBytes(kind: AssetKind, filename: string, header: Uint8A
       (header[3] === 0x0a || header[3] === 0x0d || header[3] === 0x20)
     );
   }
+  // SPZ version 4 has an uncompressed NGSP header. Versions 1–3 are a
+  // gzip-compressed legacy format, which Spark still supports.
   return (
-    header.length >= 4 &&
-    header[0] === 0x4e &&
-    header[1] === 0x47 &&
-    header[2] === 0x53 &&
-    header[3] === 0x50
+    (header.length >= 4 &&
+      header[0] === 0x4e &&
+      header[1] === 0x47 &&
+      header[2] === 0x53 &&
+      header[3] === 0x50) ||
+    (header.length >= 2 && header[0] === 0x1f && header[1] === 0x8b)
   );
 }
 

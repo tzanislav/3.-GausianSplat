@@ -31,6 +31,7 @@ import {
   type ViewerState,
 } from '@gaussian-viewer/viewer-core';
 import { AuthProvider, useAuth } from '../../auth.js';
+import { createUuid } from '../../lib/uuid.js';
 import { SceneLoadingOverlay } from '../viewer/SceneLoadingOverlay.js';
 
 type Vector3 = [number, number, number];
@@ -1837,7 +1838,7 @@ function PersistentProjectViewer({
     const current = manifestRef.current;
     if (!current || conflictRef.current) return;
     const annotation: SceneAnnotation = {
-      id: crypto.randomUUID(),
+      id: createUuid(),
       position: [0, 0, 0],
       title: 'New annotation',
       description: '',

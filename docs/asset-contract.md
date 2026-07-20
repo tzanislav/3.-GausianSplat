@@ -7,7 +7,7 @@
 | Building             | `.glb`         | `.glb`         |
 | Gaussian environment | `.spz`, `.ply` | `.spz`, `.ply` |
 
-Spark loads `.spz` and `.ply` directly in the local viewer. `.spz` remains the preferred compressed delivery format, but direct PLY is permitted for the private MVP. Browser-side PLY-to-SPZ compression is not part of the runtime; an external conversion workflow may be added later if file transfer or startup time requires it.
+Spark loads `.spz` and `.ply` directly in the local viewer. `.spz` remains the preferred compressed delivery format, but direct PLY is permitted for the private MVP. The API recognizes both the `NGSP` header used by SPZ v4 and the gzip (`1F 8B`) signature used by valid legacy SPZ v1–v3 files. Browser-side PLY-to-SPZ compression is not part of the runtime; an external conversion workflow may be added later if file transfer or startup time requires it.
 
 ## Coordinates and transforms
 
