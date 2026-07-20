@@ -1,0 +1,23 @@
+[Unit]
+Description=Gaussian Viewer API
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/home/ubuntu/copyParty/gaussian-viewer
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/copyParty/gaussian-viewer/current
+EnvironmentFile=/etc/gaussian-viewer.env
+Environment=NODE_ENV=production
+Environment=PORT=3002
+ExecStart=/home/ubuntu/copyParty/gaussian-viewer/.tools/node/bin/node apps/api/dist/server.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

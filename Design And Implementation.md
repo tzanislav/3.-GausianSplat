@@ -762,9 +762,17 @@ named investor comments are implemented. Live browser acceptance remains for rea
 
 ---
 
-## Phase 12 — Investor-viewer polish
+## Optional future TODOs
+
+The functionality delivered through Phase 11 is the current product baseline. The phases below are
+deliberately deferred: they are optional future improvements, not planned implementation work or
+release requirements. Revisit and explicitly re-prioritize an item before starting it.
+
+## Phase 12 — Optional future TODO: Investor-viewer polish
 
 **Goal:** Produce a presentation-ready public experience.
+
+**Status:** Optional future TODO — not currently planned.
 
 ### Steps
 
@@ -792,9 +800,11 @@ This completes the **investor beta**.
 
 ---
 
-## Phase 13 — Optional processing worker
+## Phase 13 — Optional future TODO: Processing worker
 
 **Goal:** Automate preparation while retaining support for externally prepared assets.
+
+**Status:** Optional future TODO — not currently planned.
 
 ### First worker capabilities
 
@@ -828,9 +838,11 @@ The app should not depend on server-side splat reconstruction. The worker remain
 
 ---
 
-## Phase 14 — CloudFront and production delivery
+## Phase 14 — Optional future TODO: CloudFront and production delivery
 
 **Goal:** Efficiently deliver large private assets.
+
+**Status:** Optional future TODO — not currently planned.
 
 ### Steps
 
@@ -865,9 +877,11 @@ Your existing EC2 and Nginx setup is suitable for the initial API deployment. Th
 
 ---
 
-## Phase 15 — Security, reliability and beta testing
+## Phase 15 — Optional future TODO: Security, reliability and beta testing
 
 **Goal:** Protect project data and make failures recoverable.
+
+**Status:** Optional future TODO — not currently planned.
 
 ### Steps
 

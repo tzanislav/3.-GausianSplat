@@ -1049,6 +1049,10 @@ h2 {
     pointer-events: none;
   }
 
+  .public-viewer__visibility {
+    pointer-events: auto;
+  }
+
   .public-viewer__status {
     max-width: 100%;
     font-size: 0.75rem;

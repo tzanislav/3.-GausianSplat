@@ -257,3 +257,9 @@ Verified: `pnpm run build`, `pnpm run test`. Manual acceptance: create a private
 reload the editor, verify only the public one appears in a share link, submit a named comment, reopen the annotation
 to confirm its comment history and remembered name, then confirm the dashboard notice, explicit acknowledgement and
 owner deletion controls.
+
+## Current roadmap decision
+
+The delivered functionality through Phase 11 is the accepted product baseline. Phases 12–15 in
+`Design And Implementation.md` are now explicitly optional future TODOs and are not planned next
+steps. They require a fresh product decision and prioritization before any implementation begins.
