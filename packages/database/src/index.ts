@@ -322,10 +322,14 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
           },
           variants: [],
           viewerSettings: {
-            schemaVersion: 2,
+            schemaVersion: 3,
             environmentVisible: true,
             buildingVisible: true,
             sky: { visible: true, rotationYDegrees: 0 },
+            lighting: {
+              sun: { power: 2.5, color: '#ffffff', rotationDegrees: [0, 0, 0] },
+              ambient: { power: 1.8, color: '#ffffff' },
+            },
           },
           defaultCamera: null,
           createdAt: now,

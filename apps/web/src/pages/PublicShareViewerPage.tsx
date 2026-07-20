@@ -41,6 +41,11 @@ export function PublicShareViewerPage({ token }: { token: string }) {
         if (!active || !viewer) return;
         viewer.setSkyVisible(loaded.viewerSettings.sky.visible);
         viewer.setSkyRotation(loaded.viewerSettings.sky.rotationYDegrees);
+        viewer.setSunPower(loaded.viewerSettings.lighting.sun.power);
+        viewer.setSunColor(loaded.viewerSettings.lighting.sun.color);
+        viewer.setSunRotation(loaded.viewerSettings.lighting.sun.rotationDegrees);
+        viewer.setAmbientPower(loaded.viewerSettings.lighting.ambient.power);
+        viewer.setAmbientColor(loaded.viewerSettings.lighting.ambient.color);
         viewer.clearAsset('environment');
         viewer.clearAsset('building');
         if (loaded.environment) {

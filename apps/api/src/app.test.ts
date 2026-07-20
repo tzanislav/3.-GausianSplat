@@ -581,10 +581,14 @@ test('scene manifests resolve private environment keys and scene updates reject 
     },
     variants: [],
     viewerSettings: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       environmentVisible: true,
       buildingVisible: true,
       sky: { visible: true, rotationYDegrees: 0 },
+      lighting: {
+        sun: { power: 2.5, color: '#ffffff', rotationDegrees: [0, 0, 0] },
+        ambient: { power: 1.8, color: '#ffffff' },
+      },
     },
     defaultCamera: null,
     createdAt: '2026-07-18T00:00:00.000Z',
@@ -736,10 +740,14 @@ test('scene manifests resolve private environment keys and scene updates reject 
         },
       ],
       viewerSettings: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         environmentVisible: false,
         buildingVisible: true,
         sky: { visible: false, rotationYDegrees: 45 },
+        lighting: {
+          sun: { power: 1.5, color: '#c0ffee', rotationDegrees: [15, 30, 45] },
+          ambient: { power: 0.8, color: '#112233' },
+        },
       },
       defaultCamera: { position: [1, 2, 3], target: [0, 0, 0], fov: 65 },
     };
@@ -751,7 +759,13 @@ test('scene manifests resolve private environment keys and scene updates reject 
     expect(update.status).toBe(200);
     await expect(update.json()).resolves.toMatchObject({
       revision: 4,
-      viewerSettings: { environmentVisible: false },
+      viewerSettings: {
+        environmentVisible: false,
+        lighting: {
+          sun: { power: 1.5, color: '#c0ffee', rotationDegrees: [15, 30, 45] },
+          ambient: { power: 0.8, color: '#112233' },
+        },
+      },
       defaultCamera: updateBody.defaultCamera,
       variants: [
         {
@@ -773,7 +787,7 @@ test('scene manifests resolve private environment keys and scene updates reject 
     const invalid = await fetch(`${manifestOrigin}/projects/owner-project/scene`, {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ ...updateBody, revision: 4, viewerSettings: { schemaVersion: 3 } }),
+      body: JSON.stringify({ ...updateBody, revision: 4, viewerSettings: { schemaVersion: 4 } }),
     });
     expect(invalid.status).toBe(400);
     await expect(invalid.json()).resolves.toEqual({
@@ -862,10 +876,14 @@ test('anonymous share manifests are token-only, sanitized and immediately respec
       },
     ],
     viewerSettings: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       environmentVisible: true,
       buildingVisible: true,
       sky: { visible: true, rotationYDegrees: 0 },
+      lighting: {
+        sun: { power: 2.5, color: '#ffffff', rotationDegrees: [0, 0, 0] },
+        ambient: { power: 1.8, color: '#ffffff' },
+      },
     },
     defaultCamera: { position: [3, 2, 3], target: [0, 0, 0], fov: 55 },
     createdAt: '2026-07-18T00:00:00.000Z',

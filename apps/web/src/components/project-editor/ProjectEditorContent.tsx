@@ -1,4 +1,4 @@
-import type { ChangeEvent, FormEvent, PropsWithChildren } from 'react';
+import type { ChangeEvent, FormEvent, PropsWithChildren, ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AssetKind as StoredAssetKind,
@@ -32,6 +32,7 @@ import { AuthProvider, useAuth } from '../../auth.js';
 type Vector3 = [number, number, number];
 type NudgeSpeed = 'slow' | 'fast';
 type EditableAssetKind = Extract<AssetKind, 'environment' | 'building'>;
+type InspectorTab = 'assets' | 'layouts' | 'lighting' | 'annotations';
 
 interface TransformSnapshot {
   environment: Transform;
@@ -527,6 +528,7 @@ export function ProjectEditorContent({ projectId }: { projectId: string }) {
   const [kind, setKind] = useState<StoredAssetKind>('ENVIRONMENT');
   const [isUploading, setIsUploading] = useState(false);
   const [asset, setAsset] = useState<AssetRecord | null>(null);
+  const [assetToApply, setAssetToApply] = useState<AssetRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [multipartSession, setMultipartSession] = useState<UploadSession | null>(null);
   const [multipartProgress, setMultipartProgress] = useState<number | null>(null);
@@ -583,7 +585,9 @@ export function ProjectEditorContent({ projectId }: { projectId: string }) {
             'Large multipart uploads currently support .ply and .spz environments only.',
           );
         }
-        await uploadMultipartAsset(file);
+        const completedAsset = await uploadMultipartAsset(file);
+        setAsset(completedAsset);
+        setAssetToApply(completedAsset);
         return;
       }
       const checksumSha256 = await sha256Base64(file);
@@ -613,7 +617,9 @@ export function ProjectEditorContent({ projectId }: { projectId: string }) {
           (await completion.json()).error ?? 'The uploaded file could not be validated.',
         );
       }
-      setAsset((await completion.json()) as AssetRecord);
+      const completedAsset = (await completion.json()) as AssetRecord;
+      setAsset(completedAsset);
+      setAssetToApply(completedAsset);
     } catch (uploadError) {
       setError(messageFor(uploadError));
     } finally {
@@ -638,7 +644,7 @@ export function ProjectEditorContent({ projectId }: { projectId: string }) {
     }
   }
 
-  async function uploadMultipartAsset(file: File) {
+  async function uploadMultipartAsset(file: File): Promise<AssetRecord> {
     const storageKey = multipartStorageKey(projectId, file);
     let session = await loadStoredMultipartSession(storageKey);
     if (!session) {
@@ -676,9 +682,10 @@ export function ProjectEditorContent({ projectId }: { projectId: string }) {
       );
     }
     localStorage.removeItem(storageKey);
-    setAsset((await completion.json()) as AssetRecord);
+    const completedAsset = (await completion.json()) as AssetRecord;
     setMultipartSession(null);
     setMultipartProgress(null);
+    return completedAsset;
   }
 
   async function loadStoredMultipartSession(storageKey: string): Promise<UploadSession | null> {
@@ -840,78 +847,90 @@ export function ProjectEditorContent({ projectId }: { projectId: string }) {
         </header>
         <PersistentProjectViewer
           projectId={projectId}
-          readyAsset={asset?.state === 'READY' ? asset : null}
-        />
-        <ShareLinks projectId={projectId} />
-        <p>
-          Upload GLB test assets up to 100 MB, or resumable multipart PLY/SPZ environments above
-          that limit.
-        </p>
-        <section className="asset-upload" aria-label="Private asset upload">
-          <label>
-            Asset kind
-            <select
-              value={kind}
-              onChange={(event) => setKind(event.target.value as StoredAssetKind)}
-            >
-              <option value="ENVIRONMENT">Environment (.ply or .spz)</option>
-              <option value="BUILDING">Building (.glb)</option>
-            </select>
-          </label>
-          <label className="file-input">
-            <span>
-              {isUploading ? 'Hashing, uploading and validating…' : 'Choose a file (100 MB max)'}
-            </span>
-            <input
-              type="file"
-              accept={kind === 'ENVIRONMENT' ? '.ply,.spz' : '.glb,model/gltf-binary'}
-              disabled={isUploading}
-              onChange={(event) => void uploadAsset(event)}
-            />
-          </label>
-          {error ? <p className="project-error">{error}</p> : null}
-          {multipartSession ? (
-            <div className="asset-upload__result">
-              <p>
-                Multipart upload: {multipartSession.parts.length} of {multipartSession.totalParts}{' '}
-                parts recorded
-                {multipartProgress === null ? '.' : ` (${multipartProgress.toFixed(1)}%).`}
+          readyAsset={assetToApply}
+          onReadyAssetApplied={() => setAssetToApply(null)}
+          assetControls={(applyAsset) => (
+            <section className="asset-upload" aria-label="Private asset upload">
+              <p className="panel__hint">
+                Upload GLB assets up to 100 MB, or resumable multipart PLY/SPZ environments. A ready
+                upload replaces its matching scene asset automatically.
               </p>
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => void abortMultipartUpload()}
-              >
-                Abort upload
-              </button>
-            </div>
-          ) : null}
-          {asset ? (
-            <div className="asset-upload__result">
-              <p>
-                {asset.filename} is {asset.state.toLowerCase()}.
-              </p>
-              {asset.state === 'READY' ? (
-                <div className="auth-page__actions">
-                  <button
-                    className="auth-button"
-                    type="button"
-                    onClick={() => void downloadAsset()}
-                  >
-                    Download temporarily
-                  </button>
+              <label>
+                Asset kind
+                <select
+                  value={kind}
+                  onChange={(event) => setKind(event.target.value as StoredAssetKind)}
+                >
+                  <option value="ENVIRONMENT">Environment (.ply or .spz)</option>
+                  <option value="BUILDING">Building (.glb)</option>
+                </select>
+              </label>
+              <label className="file-input">
+                <span>
+                  {isUploading
+                    ? 'Hashing, uploading and validating…'
+                    : 'Choose a file (100 MB max)'}
+                </span>
+                <input
+                  type="file"
+                  accept={kind === 'ENVIRONMENT' ? '.ply,.spz' : '.glb,model/gltf-binary'}
+                  disabled={isUploading}
+                  onChange={(event) => void uploadAsset(event)}
+                />
+              </label>
+              {error ? <p className="project-error">{error}</p> : null}
+              {multipartSession ? (
+                <div className="asset-upload__result">
+                  <p>
+                    Multipart upload: {multipartSession.parts.length} of{' '}
+                    {multipartSession.totalParts} parts recorded
+                    {multipartProgress === null ? '.' : ` (${multipartProgress.toFixed(1)}%).`}
+                  </p>
                   <button
                     className="secondary-button"
                     type="button"
-                    onClick={() => void deleteAsset()}
+                    onClick={() => void abortMultipartUpload()}
                   >
-                    Delete asset
+                    Abort upload
                   </button>
                 </div>
               ) : null}
-            </div>
-          ) : null}
-        </section>
+              {asset ? (
+                <div className="asset-upload__result">
+                  <p>
+                    {asset.filename} is {asset.state.toLowerCase()}.
+                  </p>
+                  {asset.state === 'READY' ? (
+                    <div className="auth-page__actions">
+                      <button
+                        className="auth-button"
+                        type="button"
+                        onClick={() => void applyAsset(asset)}
+                      >
+                        Use in scene
+                      </button>
+                      <button
+                        className="auth-button"
+                        type="button"
+                        onClick={() => void downloadAsset()}
+                      >
+                        Download temporarily
+                      </button>
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => void deleteAsset()}
+                      >
+                        Remove asset
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </section>
+          )}
+        />
+        <ShareLinks projectId={projectId} />
       </main>
     </ProjectAccess>
   );
@@ -1212,9 +1231,13 @@ function SharePermissionToggle({
 function PersistentProjectViewer({
   projectId,
   readyAsset,
+  onReadyAssetApplied,
+  assetControls,
 }: {
   projectId: string;
   readyAsset: AssetRecord | null;
+  onReadyAssetApplied: () => void;
+  assetControls: (applyAsset: (asset: AssetRecord) => Promise<void>) => ReactNode;
 }) {
   const auth = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1237,10 +1260,24 @@ function PersistentProjectViewer({
   const [proxyGroundVisible, setProxyGroundVisible] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [cameraSaveState, setCameraSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('assets');
+  const [sunPower, setSunPower] = useState(2.5);
+  const [sunColor, setSunColor] = useState('#ffffff');
+  const [sunRotation, setSunRotation] = useState<Vector3>([0, 0, 0]);
+  const [ambientPower, setAmbientPower] = useState(1.8);
+  const [ambientColor, setAmbientColor] = useState('#ffffff');
+  const [draftAnnotations, setDraftAnnotations] = useState<
+    { id: string; title: string; description: string; color: string }[]
+  >([]);
+  const [selectedDraftAnnotationId, setSelectedDraftAnnotationId] = useState<string | undefined>();
   const transformSaveTimerRef = useRef<number | undefined>(undefined);
   const cameraSaveTimerRef = useRef<number | undefined>(undefined);
   const undoStackRef = useRef<TransformSnapshot[]>([]);
   const initialTransformsRef = useRef<TransformSnapshot | null>(null);
+  const selectionBeforeLightingRef = useRef<{
+    kind: EditableAssetKind | undefined;
+    gizmoMode: TransformGizmoMode;
+  } | null>(null);
   const buildingOpacityRef = useRef(buildingOpacity);
   const buildingWireframeRef = useRef(buildingWireframe);
   const proxyGroundVisibleRef = useRef(proxyGroundVisible);
@@ -1252,6 +1289,7 @@ function PersistentProjectViewer({
       mobile: window.matchMedia('(max-width: 767px)').matches,
       onTransformStart: () => recordTransformHistory(),
       onTransformChange: (kind, transform) => updateTransform(kind, transform, false),
+      onSunRotationChange: (rotationDegrees) => updateSunSettings({ rotationDegrees }),
     });
     viewer.selectAsset(editingKind);
     viewer.setTransformGizmoMode(gizmoMode);
@@ -1281,6 +1319,11 @@ function PersistentProjectViewer({
         if (!viewer || !active) return;
         viewer.setSkyVisible(loaded.viewerSettings.sky.visible);
         viewer.setSkyRotation(loaded.viewerSettings.sky.rotationYDegrees);
+        viewer.setSunPower(loaded.viewerSettings.lighting.sun.power);
+        viewer.setSunColor(loaded.viewerSettings.lighting.sun.color);
+        viewer.setSunRotation(loaded.viewerSettings.lighting.sun.rotationDegrees);
+        viewer.setAmbientPower(loaded.viewerSettings.lighting.ambient.power);
+        viewer.setAmbientColor(loaded.viewerSettings.lighting.ambient.color);
         viewer.clearAsset('environment');
         viewer.clearAsset('building');
         if (loaded.environment) {
@@ -1318,6 +1361,11 @@ function PersistentProjectViewer({
         conflictRef.current = false;
         setManifest(loaded);
         setCanUndo(false);
+        setSunPower(loaded.viewerSettings.lighting.sun.power);
+        setSunColor(loaded.viewerSettings.lighting.sun.color);
+        setSunRotation(loaded.viewerSettings.lighting.sun.rotationDegrees);
+        setAmbientPower(loaded.viewerSettings.lighting.ambient.power);
+        setAmbientColor(loaded.viewerSettings.lighting.ambient.color);
         setSettingsDirty(false);
         setSceneConflict(false);
         setError(null);
@@ -1498,6 +1546,56 @@ function PersistentProjectViewer({
     setSettingsDirty(true);
   }
 
+  function updateSunSettings(update: Partial<ViewerSettings['lighting']['sun']>) {
+    if (update.power !== undefined) setSunPower(update.power);
+    if (update.color !== undefined) setSunColor(update.color);
+    if (update.rotationDegrees !== undefined) setSunRotation(update.rotationDegrees);
+
+    const current = manifestRef.current;
+    if (!current || conflictRef.current) return;
+    const sun = { ...current.viewerSettings.lighting.sun, ...update };
+    if (update.power !== undefined) viewerRef.current?.setSunPower(update.power);
+    if (update.color !== undefined) viewerRef.current?.setSunColor(update.color);
+    if (update.rotationDegrees !== undefined) {
+      viewerRef.current?.setSunRotation(update.rotationDegrees);
+    }
+    const updated = {
+      ...current,
+      viewerSettings: {
+        ...current.viewerSettings,
+        lighting: { ...current.viewerSettings.lighting, sun },
+      },
+    };
+    manifestRef.current = updated;
+    desiredViewerSettingsRef.current = updated.viewerSettings;
+    setManifest(updated);
+    settingsDirtyRef.current = true;
+    setSettingsDirty(true);
+  }
+
+  function updateAmbientSettings(update: Partial<ViewerSettings['lighting']['ambient']>) {
+    if (update.power !== undefined) setAmbientPower(update.power);
+    if (update.color !== undefined) setAmbientColor(update.color);
+
+    const current = manifestRef.current;
+    if (!current || conflictRef.current) return;
+    const ambient = { ...current.viewerSettings.lighting.ambient, ...update };
+    if (update.power !== undefined) viewerRef.current?.setAmbientPower(update.power);
+    if (update.color !== undefined) viewerRef.current?.setAmbientColor(update.color);
+    const updated = {
+      ...current,
+      viewerSettings: {
+        ...current.viewerSettings,
+        lighting: { ...current.viewerSettings.lighting, ambient },
+      },
+    };
+    manifestRef.current = updated;
+    desiredViewerSettingsRef.current = updated.viewerSettings;
+    setManifest(updated);
+    settingsDirtyRef.current = true;
+    setSettingsDirty(true);
+  }
+
   function currentTransformSnapshot(): TransformSnapshot | null {
     const current = manifestRef.current;
     if (!current) return null;
@@ -1604,6 +1702,30 @@ function PersistentProjectViewer({
     viewerRef.current?.setTransformGizmoMode(mode);
   }
 
+  function changeInspectorTab(tab: InspectorTab): void {
+    if (tab === inspectorTab) return;
+    const viewer = viewerRef.current;
+
+    if (inspectorTab === 'lighting') {
+      const previous = selectionBeforeLightingRef.current;
+      viewer?.endSunRotationEdit();
+      if (previous) {
+        setEditingKind(previous.kind);
+        setGizmoMode(previous.gizmoMode);
+        viewer?.selectAsset(previous.kind);
+        viewer?.setTransformGizmoMode(previous.gizmoMode);
+      }
+      selectionBeforeLightingRef.current = null;
+    }
+
+    if (tab === 'lighting') {
+      selectionBeforeLightingRef.current = { kind: editingKind, gizmoMode };
+      setGizmoMode('rotate');
+      viewer?.beginSunRotationEdit(sunRotation);
+    }
+    setInspectorTab(tab);
+  }
+
   function changeBuildingOpacity(opacity: number): void {
     buildingOpacityRef.current = opacity;
     setBuildingOpacity(opacity);
@@ -1646,6 +1768,17 @@ function PersistentProjectViewer({
     }
     setReloadNonce((current) => current + 1);
   }
+
+  useEffect(() => {
+    if (!readyAsset || !manifest || conflictRef.current) return;
+    let active = true;
+    void addReadyAssetToScene(readyAsset).finally(() => {
+      if (active) onReadyAssetApplied();
+    });
+    return () => {
+      active = false;
+    };
+  }, [manifest, onReadyAssetApplied, readyAsset]);
 
   const selectedTransform =
     editingKind === 'environment'
@@ -1702,145 +1835,315 @@ function PersistentProjectViewer({
         </div>
       </div>
       {error ? <p className="project-error">{error}</p> : null}
-      {readyAsset ? (
-        <div className="project-viewer__actions">
-          <p>
-            Ready {readyAsset.kind === 'ENVIRONMENT' ? 'environment' : 'building'}:{' '}
-            {readyAsset.filename}
-          </p>
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={!manifest || sceneConflict}
-            onClick={() => void addReadyAssetToScene(readyAsset)}
-          >
-            {readyAsset.kind === 'ENVIRONMENT' ? 'Use as environment' : 'Use as building'}
-          </button>
-        </div>
-      ) : null}
       <div className="project-viewer__workspace">
-        <aside className="panel panel--controls">
-          <section>
-            <h2>Alignment</h2>
-            <label className="speed-select">
-              <span>Object</span>
-              <select
-                value={editingKind ?? 'none'}
-                disabled={!manifest || sceneConflict}
-                onChange={(event) =>
-                  selectEditingAsset(
-                    event.target.value === 'none'
-                      ? undefined
-                      : (event.target.value as EditableAssetKind),
-                  )
+        <aside className="panel panel--controls" aria-label="Editor inspector">
+          <div className="inspector-tabs" role="tablist" aria-label="Editor panels">
+            {(['assets', 'layouts', 'lighting', 'annotations'] as const).map((tab) => (
+              <button
+                key={tab}
+                className={
+                  inspectorTab === tab ? 'inspector-tabs__tab is-active' : 'inspector-tabs__tab'
                 }
+                type="button"
+                role="tab"
+                aria-selected={inspectorTab === tab}
+                onClick={() => changeInspectorTab(tab)}
               >
-                <option value="none">None</option>
-                <option value="environment">Environment</option>
-                <option value="building" disabled={!manifest?.variants[0]}>
-                  Building
-                </option>
-              </select>
-            </label>
-            <label className="speed-select">
-              <span>Gizmo</span>
-              <select
-                value={gizmoMode}
-                disabled={!manifest || sceneConflict}
-                onChange={(event) => changeGizmoMode(event.target.value as TransformGizmoMode)}
-              >
-                <option value="translate">Move</option>
-                <option value="rotate">Rotate</option>
-              </select>
-            </label>
-            <p className="panel__hint">
-              Select an object, then drag its move or rotate gizmo. Position is in metres and
-              rotation is Euler XYZ degrees. Transforms save automatically.
-            </p>
-            {selectedTransform ? (
-              <details className="numeric-transform-controls">
-                <summary>Numeric alignment</summary>
-                <TransformControls
-                  kind={editingKind}
-                  transform={selectedTransform}
-                  disabled={sceneConflict || (editingKind === 'building' && !manifest?.variants[0])}
-                  onChange={(transform) => updateTransform(editingKind, transform)}
+                {tab === 'layouts' ? 'Layouts' : tab[0].toUpperCase() + tab.slice(1)}
+              </button>
+            ))}
+          </div>
+          {inspectorTab === 'assets' ? assetControls(addReadyAssetToScene) : null}
+          {inspectorTab === 'layouts' ? (
+            <>
+              <section>
+                <h2>Object layout</h2>
+                <label className="speed-select">
+                  <span>Object</span>
+                  <select
+                    value={editingKind ?? 'none'}
+                    disabled={!manifest || sceneConflict}
+                    onChange={(event) =>
+                      selectEditingAsset(
+                        event.target.value === 'none'
+                          ? undefined
+                          : (event.target.value as EditableAssetKind),
+                      )
+                    }
+                  >
+                    <option value="none">None</option>
+                    <option value="environment">Environment</option>
+                    <option value="building" disabled={!manifest?.variants[0]}>
+                      Building
+                    </option>
+                  </select>
+                </label>
+                <label className="speed-select">
+                  <span>Gizmo</span>
+                  <select
+                    value={gizmoMode}
+                    disabled={!manifest || sceneConflict}
+                    onChange={(event) => changeGizmoMode(event.target.value as TransformGizmoMode)}
+                  >
+                    <option value="translate">Move</option>
+                    <option value="rotate">Rotate</option>
+                  </select>
+                </label>
+                <p className="panel__hint">
+                  Select an object, then drag its move or rotate gizmo. Position is in metres and
+                  rotation is Euler XYZ degrees. Transforms save automatically.
+                </p>
+                {selectedTransform ? (
+                  <details className="numeric-transform-controls">
+                    <summary>Numeric alignment</summary>
+                    <TransformControls
+                      kind={editingKind}
+                      transform={selectedTransform}
+                      disabled={
+                        sceneConflict || (editingKind === 'building' && !manifest?.variants[0])
+                      }
+                      onChange={(transform) => updateTransform(editingKind, transform)}
+                    />
+                  </details>
+                ) : (
+                  <p className="panel__hint">
+                    {editingKind
+                      ? 'Upload and apply a building to edit its placement.'
+                      : 'Choose an object to show its transform controls.'}
+                  </p>
+                )}
+              </section>
+              <section>
+                <h2>Display</h2>
+                <label className="opacity-control">
+                  <span>Building opacity</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={buildingOpacity}
+                    disabled={!manifest?.variants[0]}
+                    onChange={(event) => changeBuildingOpacity(Number(event.target.value))}
+                  />
+                </label>
+                <Toggle
+                  label="Building wireframe"
+                  checked={buildingWireframe}
+                  disabled={!manifest?.variants[0]}
+                  onChange={changeBuildingWireframe}
                 />
-              </details>
-            ) : (
+                <Toggle
+                  label="Proxy ground"
+                  checked={proxyGroundVisible}
+                  onChange={changeProxyGroundVisible}
+                />
+                <p className="panel__hint">Display controls are local to this editing session.</p>
+              </section>
+              <section>
+                <h2>Edit session</h2>
+                <div className="auth-page__actions">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={!canUndo || sceneConflict}
+                    onClick={undoLastTransform}
+                  >
+                    Undo transform
+                  </button>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={!initialTransformsRef.current || sceneConflict}
+                    onClick={resetSessionTransforms}
+                  >
+                    Reset session
+                  </button>
+                </div>
+                <p className="panel__hint">
+                  Reset restores the alignment that was loaded for this session.
+                </p>
+              </section>
+            </>
+          ) : null}
+          {inspectorTab === 'lighting' ? (
+            <section className="lighting-controls">
+              <h2>Lighting</h2>
               <p className="panel__hint">
-                {editingKind
-                  ? 'Upload and apply a building to edit its placement.'
-                  : 'Choose an object to show its transform controls.'}
+                The rotation gizmo is attached to a center-origin light handle while this tab is
+                open. Your previous object selection is restored when you leave it.
               </p>
-            )}
-          </section>
-          <section>
-            <h2>Display</h2>
-            <label className="transform-controls__row">
-              <span>Sky Y rotation (°)</span>
-              <input
-                type="number"
-                step="1"
-                value={manifest?.viewerSettings.sky.rotationYDegrees ?? 0}
-                disabled={!manifest || sceneConflict}
-                onChange={(event) => {
-                  const rotationYDegrees = Number(event.target.value);
-                  if (Number.isFinite(rotationYDegrees)) {
-                    updateSkySettings({ rotationYDegrees });
-                  }
+              <label className="transform-controls__row">
+                <span>Sky Y rotation (°)</span>
+                <input
+                  type="number"
+                  step="1"
+                  value={manifest?.viewerSettings.sky.rotationYDegrees ?? 0}
+                  disabled={!manifest || sceneConflict}
+                  onChange={(event) => {
+                    const rotationYDegrees = Number(event.target.value);
+                    if (Number.isFinite(rotationYDegrees)) {
+                      updateSkySettings({ rotationYDegrees });
+                    }
+                  }}
+                />
+              </label>
+              <label className="transform-controls__row">
+                <span>Sun power</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={sunPower}
+                  onChange={(event) => {
+                    const power = Number(event.target.value);
+                    if (Number.isFinite(power) && power >= 0) {
+                      updateSunSettings({ power });
+                    }
+                  }}
+                />
+              </label>
+              <label className="color-control">
+                <span>Sun color</span>
+                <input
+                  type="color"
+                  value={sunColor}
+                  onChange={(event) => updateSunSettings({ color: event.target.value })}
+                />
+              </label>
+              <NumericVector
+                label="Sun rotation (degrees)"
+                values={sunRotation}
+                disabled={false}
+                onChange={(index, rawValue) => {
+                  const value = Number(rawValue);
+                  if (!Number.isFinite(value)) return;
+                  const rotation = replaceAt(sunRotation, index, value);
+                  updateSunSettings({ rotationDegrees: rotation });
                 }}
               />
-            </label>
-            <label className="opacity-control">
-              <span>Building opacity</span>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={buildingOpacity}
-                disabled={!manifest?.variants[0]}
-                onChange={(event) => changeBuildingOpacity(Number(event.target.value))}
-              />
-            </label>
-            <Toggle
-              label="Building wireframe"
-              checked={buildingWireframe}
-              disabled={!manifest?.variants[0]}
-              onChange={changeBuildingWireframe}
-            />
-            <Toggle
-              label="Proxy ground"
-              checked={proxyGroundVisible}
-              onChange={changeProxyGroundVisible}
-            />
-            <p className="panel__hint">These display controls are local to this editing session.</p>
-          </section>
-          <section>
-            <h2>Edit session</h2>
-            <div className="auth-page__actions">
+              <label className="transform-controls__row">
+                <span>Ambient power</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={ambientPower}
+                  onChange={(event) => {
+                    const power = Number(event.target.value);
+                    if (Number.isFinite(power) && power >= 0) {
+                      updateAmbientSettings({ power });
+                    }
+                  }}
+                />
+              </label>
+              <label className="color-control">
+                <span>Ambient color</span>
+                <input
+                  type="color"
+                  value={ambientColor}
+                  onChange={(event) => updateAmbientSettings({ color: event.target.value })}
+                />
+              </label>
+              <p className="panel__hint">Lighting changes save automatically with the scene.</p>
+            </section>
+          ) : null}
+          {inspectorTab === 'annotations' ? (
+            <section className="annotation-controls">
+              <h2>Annotations</h2>
+              <label className="speed-select">
+                <span>Object</span>
+                <select
+                  value={editingKind ?? 'none'}
+                  onChange={(event) =>
+                    selectEditingAsset(
+                      event.target.value === 'none'
+                        ? undefined
+                        : (event.target.value as EditableAssetKind),
+                    )
+                  }
+                >
+                  <option value="none">None</option>
+                  <option value="environment">Environment</option>
+                  <option value="building" disabled={!manifest?.variants[0]}>
+                    Building
+                  </option>
+                </select>
+              </label>
               <button
-                className="secondary-button"
+                className="auth-button"
                 type="button"
-                disabled={!canUndo || sceneConflict}
-                onClick={undoLastTransform}
+                onClick={() => {
+                  const id = crypto.randomUUID();
+                  setDraftAnnotations((current) => [
+                    ...current,
+                    { id, title: 'New annotation', description: '', color: '#78b8f6' },
+                  ]);
+                  setSelectedDraftAnnotationId(id);
+                }}
               >
-                Undo transform
+                Add annotation
               </button>
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={!initialTransformsRef.current || sceneConflict}
-                onClick={resetSessionTransforms}
-              >
-                Reset session
-              </button>
-            </div>
-            <p className="panel__hint">
-              Reset restores the alignment that was loaded for this session.
-            </p>
-          </section>
+              {selectedDraftAnnotationId ? (
+                (() => {
+                  const annotation = draftAnnotations.find(
+                    (candidate) => candidate.id === selectedDraftAnnotationId,
+                  );
+                  if (!annotation) return null;
+                  const update = (changes: Partial<typeof annotation>) =>
+                    setDraftAnnotations((current) =>
+                      current.map((candidate) =>
+                        candidate.id === annotation.id ? { ...candidate, ...changes } : candidate,
+                      ),
+                    );
+                  return (
+                    <>
+                      <label className="editor-field">
+                        <span>Title</span>
+                        <input
+                          value={annotation.title}
+                          onChange={(event) => update({ title: event.target.value })}
+                        />
+                      </label>
+                      <label className="editor-field">
+                        <span>Description</span>
+                        <textarea
+                          value={annotation.description}
+                          onChange={(event) => update({ description: event.target.value })}
+                        />
+                      </label>
+                      <label className="color-control">
+                        <span>Color</span>
+                        <input
+                          type="color"
+                          value={annotation.color}
+                          onChange={(event) => update({ color: event.target.value })}
+                        />
+                      </label>
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => {
+                          setDraftAnnotations((current) =>
+                            current.filter((candidate) => candidate.id !== annotation.id),
+                          );
+                          setSelectedDraftAnnotationId(undefined);
+                        }}
+                      >
+                        Delete annotation
+                      </button>
+                    </>
+                  );
+                })()
+              ) : (
+                <p className="panel__hint">Add an annotation to edit its draft details.</p>
+              )}
+              <p className="panel__hint">
+                Draft annotations stay in this editor only. Scene markers and persistence are Phase
+                11 work.
+              </p>
+            </section>
+          ) : null}
         </aside>
         <section className="viewer-canvas-wrap">
           <canvas ref={canvasRef} className="viewer-canvas" aria-label="Persistent project scene" />

@@ -6,6 +6,7 @@ import {
   Color,
   DirectionalLight,
   Euler,
+  Group,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
@@ -74,6 +75,7 @@ export interface HybridViewerOptions {
   onStateChange?: (state: ViewerState) => void;
   onTransformStart?: (kind: AssetKind, transform: Transform) => void;
   onTransformChange?: (kind: AssetKind, transform: Transform) => void;
+  onSunRotationChange?: (rotationDegrees: [number, number, number]) => void;
 }
 
 export function applyTransform(object: Object3D, transform: Transform): void {
@@ -173,9 +175,13 @@ export class HybridViewer {
   private readonly onStateChange?: (state: ViewerState) => void;
   private readonly onTransformStart?: HybridViewerOptions['onTransformStart'];
   private readonly onTransformChange?: HybridViewerOptions['onTransformChange'];
+  private readonly onSunRotationChange?: HybridViewerOptions['onSunRotationChange'];
   private splat?: SplatMesh;
   private building?: Object3D;
   private proxyGround?: Mesh;
+  private readonly ambientLight: AmbientLight;
+  private readonly sunLight: DirectionalLight;
+  private readonly sunRotationHandle = new Group();
   private readonly testSphere: Mesh<SphereGeometry, MeshBasicMaterial>;
   private selectedKind?: AssetKind;
   private disposed = false;
@@ -186,6 +192,7 @@ export class HybridViewer {
     this.onStateChange = options.onStateChange;
     this.onTransformStart = options.onTransformStart;
     this.onTransformChange = options.onTransformChange;
+    this.onSunRotationChange = options.onSunRotationChange;
 
     this.renderer = new WebGLRenderer({
       canvas,
@@ -216,16 +223,23 @@ export class HybridViewer {
     });
     this.transformControls.addEventListener('objectChange', () => {
       const object = this.transformControls.object;
+      if (object === this.sunRotationHandle) {
+        this.applySunRotationFromHandle(true);
+        return;
+      }
       if (object && this.selectedKind) {
         this.onTransformChange?.(this.selectedKind, transformFromObject(object));
       }
     });
     this.scene.add(this.transformControlsHelper);
 
-    this.scene.add(new AmbientLight(0xffffff, 1.8));
-    const sun = new DirectionalLight(0xffffff, 2.5);
-    sun.position.set(8, 12, 5);
-    this.scene.add(sun);
+    this.ambientLight = new AmbientLight(0xffffff, 1.8);
+    this.scene.add(this.ambientLight);
+    this.sunLight = new DirectionalLight(0xffffff, 2.5);
+    this.sunLight.position.set(8, 12, 5);
+    this.scene.add(this.sunLight);
+    this.sunRotationHandle.name = 'Sun rotation handle';
+    this.scene.add(this.sunRotationHandle);
 
     //Sky ================================================================================================
     const texture = new TextureLoader().load('/sky.jpg');
@@ -346,6 +360,48 @@ export class HybridViewer {
     this.testSphere.rotation.y = (rotationYDegrees * Math.PI) / 180;
   }
 
+  setSunPower(power: number): void {
+    this.assertActive();
+    this.sunLight.intensity = Math.max(0, power);
+  }
+
+  setSunColor(color: string): void {
+    this.assertActive();
+    this.sunLight.color.set(color);
+  }
+
+  setSunRotation(rotationDegrees: [number, number, number]): void {
+    this.assertActive();
+    const x = (rotationDegrees[0] * Math.PI) / 180;
+    const y = (rotationDegrees[1] * Math.PI) / 180;
+    const z = (rotationDegrees[2] * Math.PI) / 180;
+    this.sunRotationHandle.rotation.set(x, y, z, 'XYZ');
+    this.applySunRotationFromHandle();
+  }
+
+  beginSunRotationEdit(rotationDegrees: [number, number, number]): void {
+    this.assertActive();
+    this.setSunRotation(rotationDegrees);
+    this.selectedKind = undefined;
+    this.transformControls.setMode('rotate');
+    this.transformControls.attach(this.sunRotationHandle);
+  }
+
+  endSunRotationEdit(): void {
+    this.assertActive();
+    this.transformControls.detach();
+  }
+
+  setAmbientPower(power: number): void {
+    this.assertActive();
+    this.ambientLight.intensity = Math.max(0, power);
+  }
+
+  setAmbientColor(color: string): void {
+    this.assertActive();
+    this.ambientLight.color.set(color);
+  }
+
   selectAsset(kind: AssetKind | undefined): void {
     this.assertActive();
     this.selectedKind = kind;
@@ -452,6 +508,7 @@ export class HybridViewer {
     this.removeSplat();
     this.removeBuilding();
     this.removeProxyGround();
+    this.scene.remove(this.sunRotationHandle);
     this.scene.remove(this.testSphere);
     this.testSphere.geometry.dispose();
     this.testSphere.material.dispose();
@@ -519,6 +576,17 @@ export class HybridViewer {
     const selected = this.selectedKind === 'environment' ? this.splat : this.building;
     if (selected) this.transformControls.attach(selected);
     else this.transformControls.detach();
+  }
+
+  private applySunRotationFromHandle(notify = false): void {
+    this.sunLight.position.set(8, 12, 5).applyEuler(this.sunRotationHandle.rotation);
+    if (notify) {
+      this.onSunRotationChange?.([
+        (this.sunRotationHandle.rotation.x * 180) / Math.PI,
+        (this.sunRotationHandle.rotation.y * 180) / Math.PI,
+        (this.sunRotationHandle.rotation.z * 180) / Math.PI,
+      ]);
+    }
   }
 
   private forEachBuildingMaterial(

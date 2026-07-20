@@ -574,6 +574,75 @@ h2 {
   gap: 0.8rem;
 }
 
+.inspector-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid #2d3a48;
+}
+
+.inspector-tabs__tab {
+  padding: 0.45rem 0.35rem;
+  border: 1px solid #3a4b5d;
+  border-radius: 0.3rem;
+  color: #b9c4d0;
+  background: #1d2a37;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.inspector-tabs__tab.is-active {
+  border-color: #4e8bc7;
+  color: #e8edf2;
+  background: #28649e;
+}
+
+.lighting-controls,
+.annotation-controls {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.color-control,
+.editor-field {
+  display: grid;
+  gap: 0.35rem;
+  color: #cdd6e0;
+  font-size: 0.85rem;
+}
+
+.color-control {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.color-control input[type='color'] {
+  width: 2.4rem;
+  height: 2rem;
+  padding: 0.15rem;
+  border: 1px solid #3a4b5d;
+  border-radius: 0.3rem;
+  background: #1d2a37;
+}
+
+.editor-field input,
+.editor-field textarea {
+  width: 100%;
+  padding: 0.4rem;
+  border: 1px solid #3a4b5d;
+  border-radius: 0.3rem;
+  color: #e8edf2;
+  background: #1d2a37;
+  font: inherit;
+}
+
+.editor-field textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+
 .panel__hint {
   color: #9fabb8;
   font-size: 0.8rem;

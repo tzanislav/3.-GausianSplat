@@ -178,33 +178,57 @@ export const SkySettingsSchema = z.object({
   rotationYDegrees: z.number().finite().default(0),
 });
 
+export const LightColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+
+export const SunLightSettingsSchema = z.object({
+  power: z.number().finite().nonnegative().default(2.5),
+  color: LightColorSchema.default('#ffffff'),
+  rotationDegrees: z
+    .tuple([z.number().finite(), z.number().finite(), z.number().finite()])
+    .default([0, 0, 0]),
+});
+
+export const AmbientLightSettingsSchema = z.object({
+  power: z.number().finite().nonnegative().default(1.8),
+  color: LightColorSchema.default('#ffffff'),
+});
+
+export const LightingSettingsSchema = z.object({
+  sun: SunLightSettingsSchema.default({ power: 2.5, color: '#ffffff', rotationDegrees: [0, 0, 0] }),
+  ambient: AmbientLightSettingsSchema.default({ power: 1.8, color: '#ffffff' }),
+});
+
 export const ViewerSettingsSchema = z.object({
-  schemaVersion: z.literal(2),
+  schemaVersion: z.literal(3),
   environmentVisible: z.boolean().default(true),
   buildingVisible: z.boolean().default(true),
   sky: SkySettingsSchema.default({ visible: true, rotationYDegrees: 0 }),
+  lighting: LightingSettingsSchema.default({
+    sun: { power: 2.5, color: '#ffffff', rotationDegrees: [0, 0, 0] },
+    ambient: { power: 1.8, color: '#ffffff' },
+  }),
 });
 
 /**
- * Migrate the pre-versioned Phase 4–6 scene shape and version 1 settings to the current
+ * Migrate the pre-versioned Phase 4–6 scene shape and versions 1–2 settings to the current
  * durable viewer-settings version. Later unknown versions deliberately fail instead of being
  * silently rewritten.
  */
 export function migrateViewerSettings(value: unknown): ViewerSettings {
   if (value === undefined || value === null) {
-    return ViewerSettingsSchema.parse({ schemaVersion: 2 });
+    return ViewerSettingsSchema.parse({ schemaVersion: 3 });
   }
   if (typeof value === 'object' && !Array.isArray(value) && !('schemaVersion' in value)) {
-    return ViewerSettingsSchema.parse({ ...value, schemaVersion: 2 });
+    return ViewerSettingsSchema.parse({ ...value, schemaVersion: 3 });
   }
   if (
     typeof value === 'object' &&
     value !== null &&
     !Array.isArray(value) &&
     'schemaVersion' in value &&
-    value.schemaVersion === 1
+    (value.schemaVersion === 1 || value.schemaVersion === 2)
   ) {
-    return ViewerSettingsSchema.parse({ ...value, schemaVersion: 2 });
+    return ViewerSettingsSchema.parse({ ...value, schemaVersion: 3 });
   }
   return ViewerSettingsSchema.parse(value);
 }

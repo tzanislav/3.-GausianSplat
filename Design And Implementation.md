@@ -681,27 +681,78 @@ This completes the **shareable MVP**.
 
 ---
 
-## Phase 11 — Camera bookmarks and annotations
+## Phase 10.5 — Editor UI Upgrade
+
+**Goal:**  Compact the ui into a more orderd structure
+
+**Status:** Implementation complete; manual acceptance pending.
+
+1. Add tabs to the inspector panel (the left side of the editor canvas)
+        a. Assets
+                -Upload Environment (if one exists, replace it when uploadin a new one)
+                -Remove Asset
+                -Upload Building (if one exists, replace it when uploadin a new one)
+                -Remove Asset
+        b. layouts
+                -Object Selector
+                -The transform controls
+        c. Lighting
+                -Power control for the sun
+                -Color controls for the sun
+                -Rotation controls for the main sun light
+                -Power control for the Ambient ligth
+                -Color control for the Ambient light
+        d. Annotations
+                -Object Selector (same as b.)
+                -Add annotation
+                -Title
+                -Description
+                -Color
+                -Delete (removes selected annotation if one is selected)
+
+### Acceptance
+
+        * User will verify manually
+
+### Implementation notes
+
+The owner editor's inspector now has Assets, Layouts, Lighting and Annotations tabs. Asset
+uploads and the use/remove actions are grouped under Assets; replacing an environment or building
+continues to use the existing revision-checked scene update flow. Layouts contains the existing
+canonical transform controls and local display/edit-session controls. Lighting contains durable
+sky Y-axis rotation plus sun and ambient power, color and rotation settings, all persisted through
+the existing revision-checked scene update flow.
+
+Opening the Lighting tab attaches the rotate gizmo to a center-origin phantom light handle. The
+directional sun follows that handle's rotation, and the previous selected scene object and gizmo
+mode are restored on leaving the tab.
+
+The Annotations tab provides the requested draft fields while annotation markers and durable scene
+state remain Phase 11 work.
+
+---
+
+## Phase 11 — Annotations
 
 **Goal:** Turn the viewer into a controlled presentation.
 
 ### Steps
 
-1. Add camera-bookmark CRUD.
-2. Store camera position, target and field of view.
-3. Add bookmark thumbnails.
-4. Add annotation points.
+1. Add annotation points. (Small circle pinned in 3d spcace with text that when clicked opens a small text overlay with additional information)
+2. Add a comment box to the additional information box where the investor can post a comment to the annotation
+2.1 Add a little icon to the project card notifing the creator that there is a new investor comment.
+5. Annotation flow:
+        a. Button "Add Annotation" (adds a new annotation to the scene at 0,0,0)
+        b. Adds the annotation to the drop down with object to transform and selects it
+        c. Locations of all annotation are stored in the project
 5. Add annotation titles and descriptions.
-6. Add annotation visibility rules.
-7. Add bookmark ordering.
-8. Add optional guided presentation sequence.
-9. Add default opening camera. This is the same scene-level `defaultCamera` saved in Phase 7; bookmarks remain additional named viewpoints.
+6. Add annotation visibility rules. (Show/Hide in editor and investor viewer)
+
 
 ### Acceptance
 
-* The owner can prepare a sequence of investor viewpoints.
-* Public viewers can navigate the approved sequence.
 * Annotations remain correctly positioned after reload.
+*
 * Internal annotations can be excluded from sharing.
 
 ---

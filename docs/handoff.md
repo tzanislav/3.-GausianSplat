@@ -202,3 +202,23 @@ same values from the public manifest. Viewer settings version 1 migrates to vers
 visible, unrotated sky; no MongoDB migration is required.
 
 Verified: `pnpm run test`, `pnpm run build`, and `pnpm run lint`.
+
+## Phase 10.5: Editor UI upgrade
+
+The owner editor inspector is now organized into **Assets**, **Layouts**, **Lighting**, and
+**Annotations** tabs. Assets contains the private environment/building upload workflow, which
+automatically replaces the corresponding scene asset after validation, plus optional re-apply,
+temporary download, and removal actions. Layouts groups object selection, canonical transform
+controls, local display settings, and session undo/reset controls.
+
+Lighting contains durable sky Y-axis rotation, sun power/color/rotation and ambient power/color
+controls. Those values use viewer-settings schema version 3 and persist through the existing
+revision-checked scene update flow; schema versions 1 and 2 migrate to the default lighting.
+Entering Lighting selects a center-origin phantom rotation handle; the sun follows its rotation,
+and leaving restores the prior selected object and gizmo mode. The Annotations tab
+provides an object selector and local annotation drafts with add,
+title, description, color and delete controls. Drafts are intentionally not persisted or rendered
+as scene markers: those Phase 11 production capabilities remain out of scope for this UI phase.
+
+Verified: `pnpm run lint`, `pnpm run test`, and `pnpm run build`. Manual acceptance: confirm the
+four tabs and their controls in an authenticated editor with ready environment/building assets.
