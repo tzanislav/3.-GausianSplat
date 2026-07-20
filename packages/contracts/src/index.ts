@@ -262,16 +262,20 @@ export const SceneAnnotationSchema = z.object({
 });
 
 export const CreateAnnotationCommentInputSchema = z.object({
+  name: z.string().trim().min(1).max(120),
   body: z.string().trim().min(1).max(2_000),
 });
 
 export const AnnotationCommentSchema = z.object({
   id: z.string().min(1),
   annotationId: z.string().min(1),
+  name: z.string().min(1).max(120),
   body: z.string().min(1),
   createdAt: z.string().datetime(),
   readAt: z.string().datetime().nullable(),
 });
+
+export const PublicAnnotationCommentSchema = AnnotationCommentSchema.omit({ readAt: true });
 
 export const SceneUpdateInputSchema = z.object({
   revision: z.number().int().nonnegative(),
@@ -399,6 +403,7 @@ export type OwnerSceneVariant = z.infer<typeof OwnerSceneVariantSchema>;
 export type SceneAnnotation = z.infer<typeof SceneAnnotationSchema>;
 export type CreateAnnotationCommentInput = z.infer<typeof CreateAnnotationCommentInputSchema>;
 export type AnnotationComment = z.infer<typeof AnnotationCommentSchema>;
+export type PublicAnnotationComment = z.infer<typeof PublicAnnotationCommentSchema>;
 export type SceneUpdateInput = z.infer<typeof SceneUpdateInputSchema>;
 export type SceneManifest = z.infer<typeof SceneManifestSchema>;
 export type OwnerSceneManifest = z.infer<typeof OwnerSceneManifestSchema>;

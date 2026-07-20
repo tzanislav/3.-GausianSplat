@@ -78,12 +78,15 @@ manifest is a five-minute S3 presigned URL.
 
 Annotations are part of the revision-checked `PUT /projects/{projectId}/scene` payload. Owner manifests include
 all annotations; public manifests include only `PUBLIC` annotations and only when the share link's
-`showAnnotations` permission is enabled. Investor comments are deliberately not part of a public manifest.
+`showAnnotations` permission is enabled. Investor comments are deliberately not part of a public manifest; an enabled
+public annotation's history is retrieved only through its share-token endpoint.
 
 | Endpoint                                                          | Purpose                                                                           |
 | ----------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `POST /public/shares/{token}/annotations/{annotationId}/comments` | Submit a bounded anonymous comment to an enabled link's public annotation.        |
+| `POST /public/shares/{token}/annotations/{annotationId}/comments` | Submit a bounded named comment to an enabled link's public annotation.            |
+| `GET /public/shares/{token}/annotations/{annotationId}/comments`  | List named comment history for an enabled public annotation.                      |
 | `GET /projects/{projectId}/annotation-comments`                   | Owner-only list of investor comments.                                             |
 | `POST /projects/{projectId}/annotation-comments/acknowledge`      | Owner-only acknowledgement that marks the project's outstanding comments as read. |
+| `DELETE /projects/{projectId}/annotation-comments/{commentId}`    | Owner-only permanent removal of one investor comment.                             |
 
 The public comment endpoint returns the same `404` for an invalid/disabled link and an inaccessible annotation.

@@ -1289,6 +1289,7 @@ function PersistentProjectViewer({
   const [ambientColor, setAmbientColor] = useState('#ffffff');
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | undefined>();
   const [annotationComments, setAnnotationComments] = useState<AnnotationComment[]>([]);
+  const [isUpdatingComments, setIsUpdatingComments] = useState(false);
   const transformSaveTimerRef = useRef<number | undefined>(undefined);
   const annotationSaveTimerRef = useRef<number | undefined>(undefined);
   const cameraSaveTimerRef = useRef<number | undefined>(undefined);
@@ -1842,7 +1843,7 @@ function PersistentProjectViewer({
       description: '',
       color: '#78b8f6',
       labelOffset: [16, -8, 0],
-      visibility: 'PRIVATE',
+      visibility: 'PUBLIC',
     };
     const annotations = [...current.annotations, annotation];
     const updated = { ...current, annotations };
@@ -1875,13 +1876,58 @@ function PersistentProjectViewer({
       );
       if (!response.ok) throw new Error('Investor comments could not be loaded.');
       setAnnotationComments((await response.json()) as AnnotationComment[]);
-      await auth.authenticatedFetch(`/api/projects/${projectId}/annotation-comments/acknowledge`, {
-        method: 'POST',
-      });
     } catch (loadError) {
       setError(messageFor(loadError));
     }
   }
+
+  async function acknowledgeAnnotationComments(): Promise<void> {
+    try {
+      setIsUpdatingComments(true);
+      const response = await auth.authenticatedFetch(
+        `/api/projects/${projectId}/annotation-comments/acknowledge`,
+        { method: 'POST' },
+      );
+      if (!response.ok) throw new Error('Investor comments could not be acknowledged.');
+      const readAt = new Date().toISOString();
+      setAnnotationComments((current) =>
+        current.map((comment) => ({ ...comment, readAt: comment.readAt ?? readAt })),
+      );
+    } catch (acknowledgeError) {
+      setError(messageFor(acknowledgeError));
+    } finally {
+      setIsUpdatingComments(false);
+    }
+  }
+
+  async function deleteAnnotationComment(comment: AnnotationComment): Promise<void> {
+    if (!window.confirm(`Delete this comment from ${comment.name}? This cannot be undone.`)) return;
+    try {
+      setIsUpdatingComments(true);
+      const response = await auth.authenticatedFetch(
+        `/api/projects/${projectId}/annotation-comments/${encodeURIComponent(comment.id)}`,
+        { method: 'DELETE' },
+      );
+      if (!response.ok) throw new Error('Investor comment could not be deleted.');
+      setAnnotationComments((current) => current.filter((item) => item.id !== comment.id));
+    } catch (deleteError) {
+      setError(messageFor(deleteError));
+    } finally {
+      setIsUpdatingComments(false);
+    }
+  }
+
+  function openCommentAnnotation(annotationId: string): void {
+    if (!manifestRef.current?.annotations.some((annotation) => annotation.id === annotationId)) {
+      return;
+    }
+    changeInspectorTab('annotations');
+    selectAnnotation(annotationId);
+  }
+
+  useEffect(() => {
+    if (auth.status === 'authenticated') void loadAnnotationComments();
+  }, [auth, projectId]);
 
   function changeGizmoMode(mode: TransformGizmoMode): void {
     setGizmoMode(mode);
@@ -2392,24 +2438,6 @@ function PersistentProjectViewer({
                   Add an annotation to edit its details and move its marker.
                 </p>
               )}
-              <h3>Investor comments</h3>
-              {annotationComments.length ? (
-                <ul className="annotation-comments">
-                  {annotationComments.map((comment) => (
-                    <li key={comment.id}>
-                      <strong>
-                        {manifest?.annotations.find(
-                          (annotation) => annotation.id === comment.annotationId,
-                        )?.title ?? 'Deleted annotation'}
-                      </strong>
-                      <p>{comment.body}</p>
-                      <small>{formatDate(comment.createdAt)}</small>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="panel__hint">No investor comments yet.</p>
-              )}
             </section>
           ) : null}
         </aside>
@@ -2426,6 +2454,93 @@ function PersistentProjectViewer({
           </p>
         </section>
       </div>
+      <section className="investor-comments" aria-labelledby="investor-comments-title">
+        <div className="investor-comments__header">
+          <div>
+            <h2 id="investor-comments-title">Investor comments</h2>
+            <p className="panel__hint">Feedback left on shared annotation markers.</p>
+          </div>
+          <div className="auth-page__actions">
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={
+                isUpdatingComments || !annotationComments.some((comment) => !comment.readAt)
+              }
+              onClick={() => void acknowledgeAnnotationComments()}
+            >
+              Acknowledge seen
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={isUpdatingComments}
+              onClick={() => void loadAnnotationComments()}
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+        {annotationComments.length ? (
+          <ul className="annotation-comments">
+            {annotationComments.map((comment) => (
+              <li key={comment.id}>
+                <div className="annotation-comments__heading">
+                  <strong>
+                    {(() => {
+                      const annotation = manifest?.annotations.find(
+                        (annotation) => annotation.id === comment.annotationId,
+                      );
+                      return annotation ? (
+                        <button
+                          className="annotation-comments__open"
+                          type="button"
+                          onClick={() => openCommentAnnotation(annotation.id)}
+                        >
+                          {annotation.title}
+                        </button>
+                      ) : (
+                        'Deleted annotation'
+                      );
+                    })()}
+                  </strong>
+                  {!comment.readAt ? <span>New</span> : null}
+                </div>
+                <p>
+                  {manifest?.annotations.some(
+                    (annotation) => annotation.id === comment.annotationId,
+                  ) ? (
+                    <button
+                      className="annotation-comments__open"
+                      type="button"
+                      onClick={() => openCommentAnnotation(comment.annotationId)}
+                    >
+                      {comment.body}
+                    </button>
+                  ) : (
+                    comment.body
+                  )}
+                </p>
+                <div className="annotation-comments__footer">
+                  <small>
+                    {comment.name} · {formatDate(comment.createdAt)}
+                  </small>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={isUpdatingComments}
+                    onClick={() => void deleteAnnotationComment(comment)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="panel__hint">No investor comments yet.</p>
+        )}
+      </section>
     </section>
   );
 }

@@ -108,6 +108,50 @@ export function createApp(dependencies: AppDependencies = {}): Express {
     }
   });
 
+  app.get(
+    '/public/shares/:token/annotations/:annotationId/comments',
+    async (request, response, next) => {
+      try {
+        const token = projectIdFrom(request.params.token);
+        const annotationId = projectIdFrom(request.params.annotationId);
+        if (!isShareToken(token) || !annotationId) {
+          response.status(404).json({ error: 'Share link not found.' });
+          return;
+        }
+        const shares = requireShares(dependencies, response);
+        const scenes = requireScenes(dependencies, response);
+        const comments = requireAnnotationComments(dependencies, response);
+        if (!shares || !scenes || !comments) return;
+        const link = await shares.getActiveShareLinkByTokenHash(hashShareToken(token), new Date());
+        if (!link || !link.permissions.showAnnotations) {
+          response.status(404).json({ error: 'Share link not found.' });
+          return;
+        }
+        const scene = await scenes.getScene(link.projectId);
+        const annotation = scene?.annotations.find(
+          (candidate) => candidate.id === annotationId && candidate.visibility === 'PUBLIC',
+        );
+        if (!annotation) {
+          response.status(404).json({ error: 'Share link not found.' });
+          return;
+        }
+        const history = await comments.listAnnotationComments(link.projectId, annotationId);
+        response.set({ 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
+        response.status(200).json(
+          history.map(({ id, annotationId: historyAnnotationId, name, body, createdAt }) => ({
+            id,
+            annotationId: historyAnnotationId,
+            name,
+            body,
+            createdAt,
+          })),
+        );
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
   app.post(
     '/public/shares/:token/annotations/:annotationId/comments',
     async (request, response, next) => {
@@ -140,6 +184,7 @@ export function createApp(dependencies: AppDependencies = {}): Express {
           projectId: link.projectId,
           annotationId,
           shareLinkId: link.id,
+          name: input.data.name,
           body: input.data.body,
         });
         if (!comment) {
@@ -456,6 +501,30 @@ export function createApp(dependencies: AppDependencies = {}): Express {
         const comments = requireAnnotationComments(dependencies, response);
         if (!project || !comments) return;
         await comments.markProjectCommentsRead(project.id);
+        response.status(204).end();
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.delete(
+    '/projects/:projectId/annotation-comments/:commentId',
+    requireAuthentication,
+    async (request, response, next) => {
+      try {
+        const project = await getOwnedProject(
+          dependencies,
+          response,
+          projectIdFrom(request.params.projectId),
+        );
+        const comments = requireAnnotationComments(dependencies, response);
+        const commentId = projectIdFrom(request.params.commentId);
+        if (!project || !comments) return;
+        if (!commentId || !(await comments.deleteProjectComment(project.id, commentId))) {
+          response.status(404).json({ error: 'Investor comment not found.' });
+          return;
+        }
         response.status(204).end();
       } catch (error) {
         next(error);

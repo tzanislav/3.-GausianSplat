@@ -152,8 +152,14 @@ test('validates durable annotation details and bounded investor comments', () =>
       visibility: 'PUBLIC',
     }),
   ).toMatchObject({ color: '#78b8f6', labelOffset: [16, -8, 0] });
-  expect(CreateAnnotationCommentInputSchema.safeParse({ body: ' '.repeat(1) }).success).toBe(false);
+  expect(
+    CreateAnnotationCommentInputSchema.safeParse({ name: 'Investor', body: ' '.repeat(1) }).success,
+  ).toBe(false);
+  expect(
+    CreateAnnotationCommentInputSchema.safeParse({ name: 'Investor', body: 'Useful detail.' })
+      .success,
+  ).toBe(true);
   expect(CreateAnnotationCommentInputSchema.safeParse({ body: 'Useful detail.' }).success).toBe(
-    true,
+    false,
   );
 });

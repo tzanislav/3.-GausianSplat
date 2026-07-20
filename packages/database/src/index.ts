@@ -106,6 +106,7 @@ interface MongoAnnotationCommentDocument {
   projectId: ObjectId;
   annotationId: string;
   shareLinkId: ObjectId;
+  name: string;
   body: string;
   createdAt: Date;
   readAt: Date | null;
@@ -152,10 +153,13 @@ export interface AnnotationCommentRepository {
     projectId: string;
     annotationId: string;
     shareLinkId: string;
+    name: string;
     body: string;
   }): Promise<AnnotationComment | null>;
   listProjectComments(projectId: string): Promise<AnnotationComment[]>;
+  listAnnotationComments(projectId: string, annotationId: string): Promise<AnnotationComment[]>;
   markProjectCommentsRead(projectId: string): Promise<void>;
+  deleteProjectComment(projectId: string, commentId: string): Promise<boolean>;
 }
 
 export interface NewAsset {
@@ -674,6 +678,7 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
           projectId,
           annotationId: input.annotationId,
           shareLinkId,
+          name: input.name,
           body: input.body,
           createdAt: now,
           readAt: null,
@@ -689,6 +694,17 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
           await annotationComments.find({ projectId: objectId }).sort({ createdAt: -1 }).toArray()
         ).map(toAnnotationComment);
       },
+      async listAnnotationComments(projectId, annotationId) {
+        const objectId = toObjectId(projectId);
+        if (!objectId) return [];
+        const { annotationComments } = await getCollections();
+        return (
+          await annotationComments
+            .find({ projectId: objectId, annotationId })
+            .sort({ createdAt: 1 })
+            .toArray()
+        ).map(toAnnotationComment);
+      },
       async markProjectCommentsRead(projectId) {
         const objectId = toObjectId(projectId);
         if (!objectId) return;
@@ -697,6 +713,17 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
           { projectId: objectId, readAt: null },
           { $set: { readAt: new Date() } },
         );
+      },
+      async deleteProjectComment(projectId, commentId) {
+        const projectIdObject = toObjectId(projectId);
+        const commentIdObject = toObjectId(commentId);
+        if (!projectIdObject || !commentIdObject) return false;
+        const { annotationComments } = await getCollections();
+        const result = await annotationComments.deleteOne({
+          _id: commentIdObject,
+          projectId: projectIdObject,
+        });
+        return result.deletedCount === 1;
       },
     },
     uploadSessions: {
@@ -858,6 +885,7 @@ function toAnnotationComment(document: MongoAnnotationCommentDocument): Annotati
   return {
     id: document._id.toHexString(),
     annotationId: document.annotationId,
+    name: document.name || 'Anonymous investor',
     body: document.body,
     createdAt: document.createdAt.toISOString(),
     readAt: document.readAt?.toISOString() ?? null,

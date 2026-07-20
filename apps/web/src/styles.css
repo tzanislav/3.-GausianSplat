@@ -614,7 +614,6 @@ h2 {
 .annotation-comments {
   display: grid;
   gap: 0.6rem;
-  max-height: 16rem;
   margin: 0;
   padding: 0;
   overflow-y: auto;
@@ -634,8 +633,68 @@ h2 {
   margin: 0.35rem 0;
 }
 
+.annotation-comments__open {
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.annotation-comments__open:hover,
+.annotation-comments__open:focus-visible {
+  color: #9fc9ef;
+  text-decoration: underline;
+}
+
 .annotation-comments small {
   color: #9fabb8;
+}
+
+.investor-comments {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+  border: 1px solid #2d3a48;
+  border-radius: 0.75rem;
+  background: #17212c;
+}
+
+.investor-comments__header,
+.annotation-comments__heading,
+.annotation-comments__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.annotation-comments__heading span {
+  padding: 0.15rem 0.35rem;
+  border-radius: 999px;
+  color: #1b1300;
+  background: #ffd687;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.annotation-comments__footer .secondary-button {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.annotation-comment-history {
+  display: grid;
+  gap: 0.55rem;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.annotation-comment-history h3 {
+  font-size: 0.85rem;
 }
 
 .annotation-overlay {
@@ -674,6 +733,16 @@ h2 {
   background: #1d2a37;
   font: inherit;
   resize: vertical;
+}
+
+.annotation-overlay input {
+  min-width: 0;
+  padding: 0.5rem;
+  border: 1px solid #3a4b5d;
+  border-radius: 0.3rem;
+  color: #e8edf2;
+  background: #1d2a37;
+  font: inherit;
 }
 
 .annotation-overlay__close {

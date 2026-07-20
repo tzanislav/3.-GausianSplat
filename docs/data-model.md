@@ -4,18 +4,18 @@ All documents use immutable IDs, ISO-8601 timestamps and a `schemaVersion` when 
 
 ## Core entities
 
-| Entity             | Required fields                                                                                                                 | Notes                                              |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| User               | `id`, `firebaseUid`, `createdAt`                                                                                                | `firebaseUid` is unique.                           |
-| Project            | `id`, `ownerFirebaseUid`, `name`, `archivedAt?`, `createdAt`, `updatedAt`                                                       | Owns scenes and share links.                       |
-| Scene              | `id`, `projectId`, `revision`, `environmentAssetId?`, `environmentTransform`, `defaultCamera?`, `viewerSettings`, `annotations` | `revision` rejects stale writes.                   |
-| Asset              | `id`, `projectId`, `ownerId`, `kind`, `state`, `originalKey?`, `runtimeKey?`, `metadata`                                        | Represents one immutable binary asset.             |
-| Variant            | `id`, `sceneId`, `assetId`, `name`, `transform`, `visible`, `displayOrder`                                                      | Points to a GLB asset.                             |
-| Camera bookmark    | `id`, `sceneId`, `name`, `position`, `target`, `fov`, `displayOrder`                                                            | Presentation state.                                |
-| Annotation         | `id`, `sceneId`, `position`, `title`, `description`, `labelOffset`, `visibility`                                                | Can be excluded from sharing.                      |
-| Annotation comment | `id`, `projectId`, `annotationId`, `shareLinkId`, `body`, `createdAt`, `readAt?`                                                | Owner-only feedback created through a public link. |
-| Share link         | `id`, `projectId`, `tokenHash`, `enabled`, `expiresAt?`, `permissions`                                                          | Never store the plaintext token.                   |
-| Upload session     | `id`, `assetId`, `storageKey`, `state`, `parts`                                                                                 | Added with multipart uploads.                      |
+| Entity             | Required fields                                                                                                                 | Notes                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| User               | `id`, `firebaseUid`, `createdAt`                                                                                                | `firebaseUid` is unique.                      |
+| Project            | `id`, `ownerFirebaseUid`, `name`, `archivedAt?`, `createdAt`, `updatedAt`                                                       | Owns scenes and share links.                  |
+| Scene              | `id`, `projectId`, `revision`, `environmentAssetId?`, `environmentTransform`, `defaultCamera?`, `viewerSettings`, `annotations` | `revision` rejects stale writes.              |
+| Asset              | `id`, `projectId`, `ownerId`, `kind`, `state`, `originalKey?`, `runtimeKey?`, `metadata`                                        | Represents one immutable binary asset.        |
+| Variant            | `id`, `sceneId`, `assetId`, `name`, `transform`, `visible`, `displayOrder`                                                      | Points to a GLB asset.                        |
+| Camera bookmark    | `id`, `sceneId`, `name`, `position`, `target`, `fov`, `displayOrder`                                                            | Presentation state.                           |
+| Annotation         | `id`, `sceneId`, `position`, `title`, `description`, `labelOffset`, `visibility`                                                | Can be excluded from sharing.                 |
+| Annotation comment | `id`, `projectId`, `annotationId`, `shareLinkId`, `name`, `body`, `createdAt`, `readAt?`                                        | Named feedback created through a public link. |
+| Share link         | `id`, `projectId`, `tokenHash`, `enabled`, `expiresAt?`, `permissions`                                                          | Never store the plaintext token.              |
+| Upload session     | `id`, `assetId`, `storageKey`, `state`, `parts`                                                                                 | Added with multipart uploads.                 |
 
 ## Phase 5 asset record
 

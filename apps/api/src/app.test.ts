@@ -1059,13 +1059,18 @@ test('anonymous share manifests are token-only, sanitized and immediately respec
     async completeMultipartUpload() {},
     async abortMultipartUpload() {},
   };
-  const createdComments: Array<{ annotationId: string; body: string }> = [];
+  const createdComments: Array<{ annotationId: string; name: string; body: string }> = [];
   const annotationComments: AnnotationCommentRepository = {
     async createComment(input) {
-      createdComments.push({ annotationId: input.annotationId, body: input.body });
+      createdComments.push({
+        annotationId: input.annotationId,
+        name: input.name,
+        body: input.body,
+      });
       return {
         id: `comment-${createdComments.length}`,
         annotationId: input.annotationId,
+        name: input.name,
         body: input.body,
         createdAt: '2026-07-18T00:00:00.000Z',
         readAt: null,
@@ -1074,7 +1079,25 @@ test('anonymous share manifests are token-only, sanitized and immediately respec
     async listProjectComments() {
       return [];
     },
+    async listAnnotationComments(_projectId, annotationId) {
+      return createdComments
+        .filter((comment) => comment.annotationId === annotationId)
+        .map((comment, index) => ({
+          id: `comment-${index + 1}`,
+          annotationId: comment.annotationId,
+          name: comment.name,
+          body: comment.body,
+          createdAt: '2026-07-18T00:00:00.000Z',
+          readAt: null,
+        }));
+    },
     async markProjectCommentsRead() {},
+    async deleteProjectComment(_projectId, commentId) {
+      const index = Number(commentId.replace('comment-', '')) - 1;
+      if (!Number.isInteger(index) || !createdComments[index]) return false;
+      createdComments.splice(index, 1);
+      return true;
+    },
   };
   const shareServer = createApp({
     tokenVerifier: verifier,
@@ -1131,19 +1154,45 @@ test('anonymous share manifests are token-only, sanitized and immediately respec
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ body: 'Please share the daylight study.' }),
+        body: JSON.stringify({ name: 'Avery', body: 'Please share the daylight study.' }),
       },
     );
     expect(comment.status).toBe(201);
     expect(createdComments).toEqual([
-      { annotationId: 'public-annotation', body: 'Please share the daylight study.' },
+      {
+        annotationId: 'public-annotation',
+        name: 'Avery',
+        body: 'Please share the daylight study.',
+      },
     ]);
+    const history = await fetch(
+      `${shareOrigin}/public/shares/${createdBody.token}/annotations/public-annotation/comments`,
+    );
+    expect(history.status).toBe(200);
+    expect(await history.json()).toEqual([
+      {
+        id: 'comment-1',
+        annotationId: 'public-annotation',
+        name: 'Avery',
+        body: 'Please share the daylight study.',
+        createdAt: '2026-07-18T00:00:00.000Z',
+      },
+    ]);
+    const deletedComment = await fetch(
+      `${shareOrigin}/projects/owner-project/annotation-comments/comment-1`,
+      { method: 'DELETE', headers: { authorization: 'Bearer owner-token' } },
+    );
+    expect(deletedComment.status).toBe(204);
+    const historyAfterDelete = await fetch(
+      `${shareOrigin}/public/shares/${createdBody.token}/annotations/public-annotation/comments`,
+    );
+    expect(await historyAfterDelete.json()).toEqual([]);
     const privateComment = await fetch(
       `${shareOrigin}/public/shares/${createdBody.token}/annotations/private-annotation/comments`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ body: 'This must stay internal.' }),
+        body: JSON.stringify({ name: 'Avery', body: 'This must stay internal.' }),
       },
     );
     expect(privateComment.status).toBe(404);

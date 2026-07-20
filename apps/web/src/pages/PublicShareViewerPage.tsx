@@ -2,6 +2,7 @@ import type { FormEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type {
   PublicAssetFormat,
+  PublicAnnotationComment,
   PublicShareManifest,
   SceneAnnotation,
 } from '@gaussian-viewer/contracts';
@@ -25,6 +26,9 @@ export function PublicShareViewerPage({ token }: { token: string }) {
   const [error, setError] = useState<string | null>(null);
   const [isSceneLoading, setIsSceneLoading] = useState(true);
   const [selectedAnnotation, setSelectedAnnotation] = useState<SceneAnnotation | null>(null);
+  const [annotationComments, setAnnotationComments] = useState<PublicAnnotationComment[]>([]);
+  const [commentHistoryStatus, setCommentHistoryStatus] = useState<string | null>(null);
+  const [investorName, setInvestorName] = useState(readInvestorNameCookie);
   const [comment, setComment] = useState('');
   const [commentStatus, setCommentStatus] = useState<string | null>(null);
   const [annotationLabelPositions, setAnnotationLabelPositions] = useState<
@@ -47,8 +51,7 @@ export function PublicShareViewerPage({ token }: { token: string }) {
           (candidate) => candidate.id === annotationId,
         );
         if (annotation) {
-          setSelectedAnnotation(annotation);
-          setCommentStatus(null);
+          void selectAnnotation(annotation);
         }
       },
       onStateChange: (state) => setMessage(state.message ?? 'Loading shared project…'),
@@ -153,9 +156,32 @@ export function PublicShareViewerPage({ token }: { token: string }) {
     };
   }, [token]);
 
+  async function selectAnnotation(
+    annotation: SceneAnnotation,
+    clearCommentStatus = true,
+  ): Promise<void> {
+    setSelectedAnnotation(annotation);
+    if (clearCommentStatus) setCommentStatus(null);
+    setAnnotationComments([]);
+    setCommentHistoryStatus('Loading previous comments…');
+    try {
+      const response = await fetch(
+        `/api/public/shares/${encodeURIComponent(token)}/annotations/${encodeURIComponent(annotation.id)}/comments`,
+        { cache: 'no-store', referrerPolicy: 'no-referrer' },
+      );
+      if (!response.ok) throw new Error('Previous comments could not be loaded.');
+      const history = (await response.json()) as PublicAnnotationComment[];
+      setAnnotationComments(history);
+      setCommentHistoryStatus(null);
+    } catch (historyError) {
+      setCommentHistoryStatus(messageFor(historyError));
+    }
+  }
+
   async function submitComment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedAnnotation || !comment.trim()) return;
+    const name = investorName.trim();
+    if (!selectedAnnotation || !name || !comment.trim()) return;
     try {
       setCommentStatus('Sending...');
       const response = await fetch(
@@ -163,14 +189,16 @@ export function PublicShareViewerPage({ token }: { token: string }) {
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ body: comment }),
+          body: JSON.stringify({ name, body: comment }),
           cache: 'no-store',
           referrerPolicy: 'no-referrer',
         },
       );
       if (!response.ok) throw new Error('Your comment could not be sent.');
+      writeInvestorNameCookie(name);
       setComment('');
       setCommentStatus('Comment sent to the project owner.');
+      void selectAnnotation(selectedAnnotation, false);
     } catch (submitError) {
       setCommentStatus(messageFor(submitError));
     }
@@ -239,7 +267,38 @@ export function PublicShareViewerPage({ token }: { token: string }) {
               </button>
               <h2>{selectedAnnotation.title}</h2>
               {selectedAnnotation.description ? <p>{selectedAnnotation.description}</p> : null}
+              <section className="annotation-comment-history" aria-label="Previous comments">
+                <h3>Previous comments</h3>
+                {commentHistoryStatus ? <p role="status">{commentHistoryStatus}</p> : null}
+                {!commentHistoryStatus && annotationComments.length ? (
+                  <ul className="annotation-comments">
+                    {annotationComments.map((previousComment) => (
+                      <li key={previousComment.id}>
+                        <strong>{previousComment.name}</strong>
+                        <p>{previousComment.body}</p>
+                        <small>{formatCommentDate(previousComment.createdAt)}</small>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {!commentHistoryStatus && annotationComments.length === 0 ? (
+                  <p>No comments yet.</p>
+                ) : null}
+              </section>
               <form onSubmit={(event) => void submitComment(event)}>
+                <label>
+                  Your name
+                  <input
+                    required
+                    maxLength={120}
+                    value={investorName}
+                    onChange={(event) => setInvestorName(event.target.value)}
+                    onBlur={() => {
+                      const name = investorName.trim();
+                      if (name) writeInvestorNameCookie(name);
+                    }}
+                  />
+                </label>
                 <label>
                   Comment for the owner
                   <textarea
@@ -300,4 +359,25 @@ function AnnotationLabels({
 
 function runtimeFilename(kind: 'environment' | 'building', format: PublicAssetFormat): string {
   return `${kind}.${format.toLowerCase()}`;
+}
+
+function readInvestorNameCookie(): string {
+  const prefix = 'gaussian_viewer_investor_name=';
+  const cookie = document.cookie.split('; ').find((entry) => entry.startsWith(prefix));
+  if (!cookie) return '';
+  try {
+    return decodeURIComponent(cookie.slice(prefix.length));
+  } catch {
+    return '';
+  }
+}
+
+function writeInvestorNameCookie(name: string): void {
+  document.cookie = `gaussian_viewer_investor_name=${encodeURIComponent(name)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+}
+
+function formatCommentDate(value: string): string {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
+    new Date(value),
+  );
 }

@@ -244,10 +244,16 @@ Shared viewers also offer the same four viewer-local visibility controls; they c
 persist changes.
 
 Public manifests filter out private annotations (and all annotations when a share link disables them). A visitor can
-submit a bounded anonymous comment only against a public annotation through a currently valid share token. Comments
-are stored separately, never exposed in public manifests, and are shown to the owner in the Annotations tab. The
-project dashboard shows an unread-comment notice; visiting the owner comment list acknowledges it.
+submit a bounded, named comment only against a public annotation through a currently valid share token. The public
+viewer remembers the entered name in a one-year, same-site browser cookie and shows prior comments when an
+annotation opens. Comments remain separate from public manifests; history is scoped to the specific enabled public
+annotation and share token.
+
+The editor displays all investor comments below the canvas rather than inside the annotation inspector. It loads them
+without changing unread state, offers an explicit acknowledgement for unread comments, and allows the owner to
+permanently delete individual comments. The project dashboard's unread-comment notice remains until acknowledgement.
 
 Verified: `pnpm run build`, `pnpm run test`. Manual acceptance: create a private and public annotation, move both,
-reload the editor, verify only the public one appears in a share link, submit a comment, then confirm the dashboard
-notice and owner comment list.
+reload the editor, verify only the public one appears in a share link, submit a named comment, reopen the annotation
+to confirm its comment history and remembered name, then confirm the dashboard notice, explicit acknowledgement and
+owner deletion controls.
