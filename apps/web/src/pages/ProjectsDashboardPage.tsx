@@ -106,8 +106,12 @@ export function ProjectsDashboardPage() {
       <section className="project-grid" aria-label="Your projects">
         {projects.map((project) => (
           <article className="project-card" key={project.id}>
-            <div className="project-card__cover" aria-label="Cover placeholder">
-              No cover
+            <div className="project-card__cover">
+              {project.coverUrl ? (
+                <img src={project.coverUrl} alt={`${project.name} thumbnail`} />
+              ) : (
+                'No cover'
+              )}
             </div>
             <div className="project-card__body">
               <h2>{project.name}</h2>

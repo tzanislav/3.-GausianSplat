@@ -32,6 +32,7 @@ interface MongoProjectDocument {
   _id: ObjectId;
   ownerFirebaseUid: string;
   name: string;
+  coverKey?: string | null;
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -107,6 +108,8 @@ export interface ProjectRepository {
   updateProject(projectId: string, input: ProjectSettingsInput): Promise<ProjectSummary | null>;
   archiveProject(projectId: string): Promise<ProjectSummary | null>;
   deleteProject(projectId: string): Promise<boolean>;
+  getProjectCoverKey(projectId: string): Promise<string | null>;
+  setProjectCoverKey(projectId: string, coverKey: string): Promise<ProjectSummary | null>;
 }
 
 export interface SceneRecord {
@@ -300,6 +303,7 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
           _id: new ObjectId(),
           ownerFirebaseUid,
           name: input.name,
+          coverKey: null,
           archivedAt: null,
           createdAt: now,
           updatedAt: now,
@@ -379,6 +383,24 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
           return true;
         }
         return false;
+      },
+      async getProjectCoverKey(projectId) {
+        const objectId = toObjectId(projectId);
+        if (!objectId) return null;
+        const { projects } = await getCollections();
+        const project = await projects.findOne({ _id: objectId }, { projection: { coverKey: 1 } });
+        return project?.coverKey ?? null;
+      },
+      async setProjectCoverKey(projectId, coverKey) {
+        const objectId = toObjectId(projectId);
+        if (!objectId) return null;
+        const { projects } = await getCollections();
+        const result = await projects.findOneAndUpdate(
+          { _id: objectId },
+          { $set: { coverKey, updatedAt: new Date() } },
+          { returnDocument: 'after' },
+        );
+        return result ? toProjectSummary(result) : null;
       },
     },
     scenes: {

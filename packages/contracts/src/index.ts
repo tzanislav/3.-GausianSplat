@@ -135,6 +135,24 @@ export const ProjectSettingsInputSchema = z.object({
 
 export const CreateProjectInputSchema = ProjectSettingsInputSchema;
 
+export const ProjectCoverUploadInputSchema = z.object({
+  size: z
+    .number()
+    .int()
+    .positive()
+    .max(5 * 1024 * 1024),
+  checksumSha256: z.string().regex(/^[A-Za-z0-9+/]{43}=$/),
+});
+
+export const ProjectCoverUploadTicketSchema = z.object({
+  uploadUrl: z.string().url(),
+  headers: z.object({
+    'content-type': z.literal('image/webp'),
+    'x-amz-checksum-sha256': z.string().regex(/^[A-Za-z0-9+/]{43}=$/),
+  }),
+  expiresAt: z.string().datetime(),
+});
+
 export const ProjectSummarySchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -326,6 +344,8 @@ export type FirebaseUser = z.infer<typeof FirebaseUserSchema>;
 export type LocalUser = z.infer<typeof LocalUserSchema>;
 export type ProjectSettingsInput = z.infer<typeof ProjectSettingsInputSchema>;
 export type CreateProjectInput = z.infer<typeof CreateProjectInputSchema>;
+export type ProjectCoverUploadInput = z.infer<typeof ProjectCoverUploadInputSchema>;
+export type ProjectCoverUploadTicket = z.infer<typeof ProjectCoverUploadTicketSchema>;
 export type ProjectSummary = z.infer<typeof ProjectSummarySchema>;
 export type ViewerSettings = z.infer<typeof ViewerSettingsSchema>;
 export type DefaultCamera = z.infer<typeof DefaultCameraSchema>;

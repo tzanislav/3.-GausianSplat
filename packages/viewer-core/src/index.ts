@@ -417,6 +417,25 @@ export class HybridViewer {
     this.controls.update();
   }
 
+  captureScreenshot(): Promise<Blob> {
+    this.assertActive();
+    this.update();
+    this.renderer.render(this.scene, this.camera);
+    return new Promise((resolve, reject) => {
+      this.canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error('The current canvas view could not be captured.'));
+            return;
+          }
+          resolve(blob);
+        },
+        'image/webp',
+        0.82,
+      );
+    });
+  }
+
   update() {
     this.testSphere.position.copy(this.camera.position);
   }

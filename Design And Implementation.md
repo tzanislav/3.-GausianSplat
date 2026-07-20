@@ -549,6 +549,7 @@ AWS recommends considering multipart upload once objects reach approximately 100
 10. Keep viewer-only state (for example camera pose or temporary UI state) separate from durable scene state. (Complete)
 11. Add an explicit **Save opening camera** action that records the current camera position, orbit-controls target and field of view as the scene's `defaultCamera`. (Complete)
 12. After a project manifest and its scene assets finish loading, restore `defaultCamera` before enabling normal presentation; use the runtime fallback camera only when no saved default exists. (Complete)
+13. When saving the opening camera, capture the rendered canvas as a WebP, upload it through an owner-issued storage URL and use its verified project cover as the dashboard thumbnail. (Complete)
 
 ### Acceptance
 
@@ -556,6 +557,7 @@ AWS recommends considering multipart upload once objects reach approximately 100
 * S3 keys are stored in MongoDB; temporary URLs are not.
 * Reloading preserves the camera and viewer settings.
 * Saving the opening camera and reopening the project restores the exact position, target and field of view after assets load.
+* Saving the opening camera also updates the project dashboard thumbnail without exposing a permanent storage URL.
 * Invalid or outdated settings are migrated or rejected clearly.
 * Concurrent edits and tab switches do not silently overwrite newer scene state.
 
@@ -622,7 +624,7 @@ At this point, the application is a usable **private internal MVP**.
 
 **Goal:** Share a project without requiring the investor to register.
 
-**Status:** Implementation complete — live browser/S3 acceptance is still required.
+**Status:** Complete.
 
 ### Steps
 
@@ -668,7 +670,7 @@ version 2 with the sky visible and unrotated.
 
 ### Acceptance
 
-* The link works in an incognito browser without login. (Implemented; live acceptance pending.)
+* The link works in an incognito browser without login. (Complete.)
 * Disabling or revoking the link stops access, or the system explicitly documents the bounded expiry window for already-issued asset URLs. (Implemented: future manifests stop immediately; previously issued S3 URLs last at most five minutes.)
 * An expired link stops access. (Implemented.)
 * Anonymous viewers cannot change any project state. (Implemented.)
@@ -714,13 +716,14 @@ This completes the **shareable MVP**.
 2. Add responsive desktop, tablet and phone layouts.
 3. Add quality presets.
 4. Add loading percentage and meaningful progress.
-5. Add variant comparison controls.
-6. Add before/proposed visibility toggle.
-7. Add project branding.
-8. Add project cover image.
+5. Add variant comparison controls. -SKIP
+6. Add before/proposed visibility toggle.  -SKIP
+7. Add project branding.  -SKIP
+8. Add project cover image. -USE THUMBNAIL
 9. Add unsupported-browser messaging.
+10. Add a loading throbber while downloading assets
 10. Add graceful handling for slow connections.
-11. Add keyboard and touch navigation.
+11. Add keyboard and touch navigation. (Completed)
 
 ### Acceptance
 

@@ -161,6 +161,12 @@ test('project endpoints scope data to the authenticated owner', async () => {
     async deleteProject() {
       return true;
     },
+    async getProjectCoverKey() {
+      return null;
+    },
+    async setProjectCoverKey(projectId) {
+      return projectSummary(projectId, 'Owner project');
+    },
   };
   const projectServer = createApp({ tokenVerifier: verifier, users, projects }).listen(0);
   await new Promise<void>((resolve) => projectServer.once('listening', resolve));
@@ -211,6 +217,128 @@ test('project endpoints scope data to the authenticated owner', async () => {
   }
 });
 
+test('project cover uploads are verified, private, and resolved to a temporary dashboard URL', async () => {
+  const verifier: TokenVerifier = {
+    async verifyIdToken(token) {
+      if (token !== 'owner-token') throw new Error('invalid token');
+      return {
+        firebaseUid: 'owner-id',
+        email: 'owner@example.com',
+        displayName: 'Owner',
+        photoUrl: null,
+      };
+    },
+  };
+  const users: UserRepository = {
+    async upsertFirebaseUser(user) {
+      return {
+        id: user.firebaseUid,
+        ...user,
+        createdAt: '2026-07-18T00:00:00.000Z',
+        updatedAt: '2026-07-18T00:00:00.000Z',
+      };
+    },
+  };
+  let coverKey: string | null = null;
+  const projects: ProjectRepository = {
+    async listOwnedProjects() {
+      return [projectSummary('owner-project', 'Owner project')];
+    },
+    async createProject(_ownerFirebaseUid, input) {
+      return projectSummary('owner-project', input.name);
+    },
+    async getProject(projectId) {
+      return projectId === 'owner-project'
+        ? { ...projectSummary(projectId, 'Owner project'), ownerFirebaseUid: 'owner-id' }
+        : null;
+    },
+    async updateProject() {
+      return null;
+    },
+    async archiveProject() {
+      return null;
+    },
+    async deleteProject() {
+      return true;
+    },
+    async getProjectCoverKey() {
+      return coverKey;
+    },
+    async setProjectCoverKey(_projectId, key) {
+      coverKey = key;
+      return projectSummary('owner-project', 'Owner project');
+    },
+  };
+  let issuedKey: string | undefined;
+  const checksumSha256 = `${'A'.repeat(43)}=`;
+  const storage: AssetStorage = {
+    async createUploadUrl({ key }) {
+      issuedKey = key;
+      return 'https://storage.example/cover-upload';
+    },
+    async createDownloadUrl(key) {
+      return `https://storage.example/download/${key}`;
+    },
+    async getObjectMetadata() {
+      return { contentLength: 24, checksumSha256 };
+    },
+    async getObjectHeader() {
+      return new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+    },
+    async createMultipartUpload() {
+      return 'unused';
+    },
+    async createMultipartPartUrl() {
+      return 'https://storage.example/unused';
+    },
+    async completeMultipartUpload() {},
+    async abortMultipartUpload() {},
+  };
+  const coverServer = createApp({ tokenVerifier: verifier, users, projects, storage }).listen(0);
+  await new Promise<void>((resolve) => coverServer.once('listening', resolve));
+  const address = coverServer.address();
+  if (!address || typeof address === 'string')
+    throw new Error('Test server did not expose a TCP address.');
+  const coverOrigin = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const upload = await fetch(`${coverOrigin}/projects/owner-project/cover/upload`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer owner-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ size: 24, checksumSha256 }),
+    });
+    expect(upload.status).toBe(200);
+    await expect(upload.json()).resolves.toMatchObject({
+      uploadUrl: 'https://storage.example/cover-upload',
+      headers: { 'content-type': 'image/webp', 'x-amz-checksum-sha256': checksumSha256 },
+    });
+    expect(issuedKey).toBe('projects/owner-project/cover/project-cover.webp');
+
+    const complete = await fetch(`${coverOrigin}/projects/owner-project/cover/complete`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer owner-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ size: 24, checksumSha256 }),
+    });
+    expect(complete.status).toBe(200);
+    await expect(complete.json()).resolves.toMatchObject({
+      coverUrl: 'https://storage.example/download/projects/owner-project/cover/project-cover.webp',
+    });
+    const list = await fetch(`${coverOrigin}/projects`, {
+      headers: { authorization: 'Bearer owner-token' },
+    });
+    await expect(list.json()).resolves.toMatchObject([
+      {
+        coverUrl:
+          'https://storage.example/download/projects/owner-project/cover/project-cover.webp',
+      },
+    ]);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      coverServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
 test('asset upload URLs are owner-scoped and assets are ready only after S3 validation', async () => {
   const verifier: TokenVerifier = {
     async verifyIdToken(token) {
@@ -255,6 +383,12 @@ test('asset upload URLs are owner-scoped and assets are ready only after S3 vali
     },
     async deleteProject() {
       return true;
+    },
+    async getProjectCoverKey() {
+      return null;
+    },
+    async setProjectCoverKey(projectId) {
+      return projectSummary(projectId, 'Owner project');
     },
   };
   let stored: (AssetRecord & { ownerFirebaseUid: string; originalKey: string }) | undefined;
@@ -426,6 +560,12 @@ test('scene manifests resolve private environment keys and scene updates reject 
     },
     async deleteProject() {
       return true;
+    },
+    async getProjectCoverKey() {
+      return null;
+    },
+    async setProjectCoverKey(projectId) {
+      return projectSummary(projectId, 'Owner project');
     },
   };
   let scene: SceneRecord = {
@@ -688,6 +828,12 @@ test('anonymous share manifests are token-only, sanitized and immediately respec
     },
     async deleteProject() {
       return true;
+    },
+    async getProjectCoverKey() {
+      return null;
+    },
+    async setProjectCoverKey(projectId) {
+      return projectSummary(projectId, 'Presentation project');
     },
   };
   const scene: SceneRecord = {

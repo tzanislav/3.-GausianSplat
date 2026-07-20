@@ -14,6 +14,7 @@
 | 5–6   | `/assets`, `/uploads`             | Presigned and multipart asset upload workflows            |
 | 7     | `/projects/{id}/manifest`         | Authenticated scene reconstruction                        |
 | 7     | `/scenes/{id}`                    | Revision-checked scene updates, including `defaultCamera` |
+| 7     | `/projects/{id}/cover`            | Owner-only WebP project-cover upload and verification     |
 | 8     | `/projects/{id}/scene`            | Revision-checked environment and first-building placement |
 | 10    | `/public/shares/{token}/manifest` | Sanitized anonymous read-only viewing                     |
 

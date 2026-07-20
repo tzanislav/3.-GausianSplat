@@ -7,6 +7,7 @@ import type {
   DefaultCamera,
   MultipartPartUrlTicket,
   OwnerSceneManifest,
+  ProjectCoverUploadTicket,
   PublicAssetFormat,
   PublicShareManifest,
   ProjectSummary,
@@ -1229,7 +1230,7 @@ function PersistentProjectViewer({
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [sceneConflict, setSceneConflict] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
-  const [editingKind, setEditingKind] = useState<EditableAssetKind>('environment');
+  const [editingKind, setEditingKind] = useState<EditableAssetKind | undefined>('environment');
   const [gizmoMode, setGizmoMode] = useState<TransformGizmoMode>('translate');
   const [buildingOpacity, setBuildingOpacity] = useState(1);
   const [buildingWireframe, setBuildingWireframe] = useState(false);
@@ -1405,15 +1406,51 @@ function PersistentProjectViewer({
       window.clearTimeout(cameraSaveTimerRef.current);
     }
     setCameraSaveState('saving');
-    const camera = viewer.getCamera();
-    const settingsSaved = await flushViewerSettings();
-    const cameraSaved = settingsSaved && (await enqueueSceneUpdate({ defaultCamera: camera }));
-    if (!cameraSaved) {
+    try {
+      const thumbnail = await viewer.captureScreenshot();
+      const camera = viewer.getCamera();
+      const settingsSaved = await flushViewerSettings();
+      const cameraSaved = settingsSaved && (await enqueueSceneUpdate({ defaultCamera: camera }));
+      if (!cameraSaved) {
+        setCameraSaveState('idle');
+        return;
+      }
+      await uploadProjectCover(thumbnail);
+      setCameraSaveState('saved');
+      cameraSaveTimerRef.current = window.setTimeout(() => setCameraSaveState('idle'), 3_000);
+    } catch (saveError) {
+      setError(messageFor(saveError));
       setCameraSaveState('idle');
-      return;
     }
-    setCameraSaveState('saved');
-    cameraSaveTimerRef.current = window.setTimeout(() => setCameraSaveState('idle'), 3_000);
+  }
+
+  async function uploadProjectCover(thumbnail: Blob): Promise<void> {
+    const checksumSha256 = await sha256Base64(thumbnail);
+    const request = await auth.authenticatedFetch(`/api/projects/${projectId}/cover/upload`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ size: thumbnail.size, checksumSha256 }),
+    });
+    if (!request.ok) {
+      throw new Error((await request.json()).error ?? 'The thumbnail upload could not be started.');
+    }
+    const ticket = (await request.json()) as ProjectCoverUploadTicket;
+    const upload = await fetch(ticket.uploadUrl, {
+      method: 'PUT',
+      headers: ticket.headers,
+      body: thumbnail,
+    });
+    if (!upload.ok) throw new Error('S3 rejected the thumbnail upload.');
+    const completion = await auth.authenticatedFetch(`/api/projects/${projectId}/cover/complete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ size: thumbnail.size, checksumSha256 }),
+    });
+    if (!completion.ok) {
+      throw new Error(
+        (await completion.json()).error ?? 'The uploaded thumbnail could not be verified.',
+      );
+    }
   }
 
   useEffect(() => {
@@ -1557,7 +1594,7 @@ function PersistentProjectViewer({
     applyTransformSnapshot(initial);
   }
 
-  function selectEditingAsset(kind: EditableAssetKind): void {
+  function selectEditingAsset(kind: EditableAssetKind | undefined): void {
     setEditingKind(kind);
     viewerRef.current?.selectAsset(kind);
   }
@@ -1613,7 +1650,9 @@ function PersistentProjectViewer({
   const selectedTransform =
     editingKind === 'environment'
       ? manifest?.environmentTransform
-      : manifest?.variants[0]?.transform;
+      : editingKind === 'building'
+        ? manifest?.variants[0]?.transform
+        : undefined;
 
   return (
     <section className="project-viewer">
@@ -1648,7 +1687,7 @@ function PersistentProjectViewer({
           </button>
           {cameraSaveState === 'saved' ? (
             <p className="camera-save-status" role="status">
-              Camera view saved
+              Camera view and thumbnail saved
             </p>
           ) : null}
           {sceneConflict ? (
@@ -1686,10 +1725,17 @@ function PersistentProjectViewer({
             <label className="speed-select">
               <span>Object</span>
               <select
-                value={editingKind}
+                value={editingKind ?? 'none'}
                 disabled={!manifest || sceneConflict}
-                onChange={(event) => selectEditingAsset(event.target.value as EditableAssetKind)}
+                onChange={(event) =>
+                  selectEditingAsset(
+                    event.target.value === 'none'
+                      ? undefined
+                      : (event.target.value as EditableAssetKind),
+                  )
+                }
               >
+                <option value="none">None</option>
                 <option value="environment">Environment</option>
                 <option value="building" disabled={!manifest?.variants[0]}>
                   Building
@@ -1722,7 +1768,11 @@ function PersistentProjectViewer({
                 />
               </details>
             ) : (
-              <p className="panel__hint">Upload and apply a building to edit its placement.</p>
+              <p className="panel__hint">
+                {editingKind
+                  ? 'Upload and apply a building to edit its placement.'
+                  : 'Choose an object to show its transform controls.'}
+              </p>
             )}
           </section>
           <section>

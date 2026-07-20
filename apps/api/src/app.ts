@@ -4,6 +4,7 @@ import {
   CreateAssetUploadInputSchema,
   CreateMultipartUploadInputSchema,
   MultipartPartUrlInputSchema,
+  ProjectCoverUploadInputSchema,
   SceneUpdateInputSchema,
   CreateProjectInputSchema,
   ProjectSettingsInputSchema,
@@ -13,6 +14,7 @@ import {
   type AssetRecord,
   type FirebaseUser,
   type PublicAssetFormat,
+  type ProjectSummary,
   type SharePermissions,
   type UploadSession,
 } from '@gaussian-viewer/contracts';
@@ -38,6 +40,7 @@ import { assetStorageTimings, type AssetStorage } from './storage.js';
 const MAX_DIRECT_UPLOAD_BYTES = 100 * 1024 * 1024;
 const MULTIPART_PART_SIZE = 16 * 1024 * 1024;
 const MAX_MULTIPART_PARTS = 10_000;
+const PROJECT_COVER_CONTENT_TYPE = 'image/webp';
 
 export interface AppDependencies {
   tokenVerifier?: TokenVerifier;
@@ -141,7 +144,15 @@ export function createApp(dependencies: AppDependencies = {}): Express {
         return;
       }
       const firebaseUser = response.locals.firebaseUser as FirebaseUser;
-      response.status(200).json(await projects.listOwnedProjects(firebaseUser.firebaseUid));
+      response
+        .status(200)
+        .json(
+          await withProjectCoverUrls(
+            await projects.listOwnedProjects(firebaseUser.firebaseUid),
+            projects,
+            dependencies.storage,
+          ),
+        );
     } catch (error) {
       next(error);
     }
@@ -172,8 +183,12 @@ export function createApp(dependencies: AppDependencies = {}): Express {
         response,
         projectIdFrom(request.params.projectId),
       );
+      const projects = requireProjects(dependencies, response);
       if (project) {
-        response.status(200).json(project);
+        if (!projects) return;
+        response
+          .status(200)
+          .json(await withProjectCoverUrl(project, projects, dependencies.storage));
       }
     } catch (error) {
       next(error);
@@ -251,6 +266,88 @@ export function createApp(dependencies: AppDependencies = {}): Express {
       next(error);
     }
   });
+
+  app.post(
+    '/projects/:projectId/cover/upload',
+    requireAuthentication,
+    async (request, response, next) => {
+      try {
+        const project = await getOwnedProject(
+          dependencies,
+          response,
+          projectIdFrom(request.params.projectId),
+        );
+        const input = ProjectCoverUploadInputSchema.safeParse(request.body);
+        const storage = requireStorage(dependencies, response);
+        if (!project || !storage) return;
+        if (!input.success) {
+          response
+            .status(400)
+            .json({ error: 'The project cover must be a WebP image up to 5 MB.' });
+          return;
+        }
+        response.status(200).json({
+          uploadUrl: await storage.createUploadUrl({
+            key: projectCoverKey(project.id),
+            contentType: PROJECT_COVER_CONTENT_TYPE,
+            checksumSha256: input.data.checksumSha256,
+          }),
+          headers: {
+            'content-type': PROJECT_COVER_CONTENT_TYPE,
+            'x-amz-checksum-sha256': input.data.checksumSha256,
+          },
+          expiresAt: new Date(
+            Date.now() + assetStorageTimings.uploadUrlTtlSeconds * 1000,
+          ).toISOString(),
+        });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.post(
+    '/projects/:projectId/cover/complete',
+    requireAuthentication,
+    async (request, response, next) => {
+      try {
+        const project = await getOwnedProject(
+          dependencies,
+          response,
+          projectIdFrom(request.params.projectId),
+        );
+        const input = ProjectCoverUploadInputSchema.safeParse(request.body);
+        const storage = requireStorage(dependencies, response);
+        const projects = requireProjects(dependencies, response);
+        if (!project || !storage || !projects) return;
+        if (!input.success) {
+          response
+            .status(400)
+            .json({ error: 'The project cover must be a WebP image up to 5 MB.' });
+          return;
+        }
+        const key = projectCoverKey(project.id);
+        const metadata = await storage.getObjectMetadata(key);
+        const header = await storage.getObjectHeader(key);
+        if (
+          metadata.contentLength !== input.data.size ||
+          metadata.checksumSha256 !== input.data.checksumSha256 ||
+          !hasWebpMagicBytes(header)
+        ) {
+          response.status(422).json({ error: 'The uploaded project cover could not be verified.' });
+          return;
+        }
+        const saved = await projects.setProjectCoverKey(project.id, key);
+        if (!saved) {
+          response.status(404).json({ error: 'Project not found.' });
+          return;
+        }
+        response.status(200).json(await withProjectCoverUrl(saved, projects, dependencies.storage));
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
   app.get(
     '/projects/:projectId/manifest',
@@ -1119,6 +1216,24 @@ function requireShares(
   return undefined;
 }
 
+async function withProjectCoverUrls(
+  projects: ProjectSummary[],
+  repository: ProjectRepository,
+  storage: AssetStorage | undefined,
+): Promise<ProjectSummary[]> {
+  return Promise.all(projects.map((project) => withProjectCoverUrl(project, repository, storage)));
+}
+
+async function withProjectCoverUrl(
+  project: ProjectSummary,
+  repository: ProjectRepository,
+  storage: AssetStorage | undefined,
+): Promise<ProjectSummary> {
+  const coverKey = await repository.getProjectCoverKey(project.id);
+  if (!coverKey || !storage) return project;
+  return { ...project, coverUrl: await storage.createDownloadUrl(coverKey) };
+}
+
 async function getOwnedProject(
   dependencies: AppDependencies,
   response: Response,
@@ -1452,6 +1567,24 @@ function storageFilename(filename: string): string {
     .replace(/[^A-Za-z0-9._-]/g, '_')
     .replace(/^[_.]+|[_.]+$/g, '');
   return safe || 'asset';
+}
+
+function projectCoverKey(projectId: string): string {
+  return `projects/${projectId}/cover/project-cover.webp`;
+}
+
+function hasWebpMagicBytes(header: Uint8Array): boolean {
+  return (
+    header.length >= 12 &&
+    header[0] === 0x52 &&
+    header[1] === 0x49 &&
+    header[2] === 0x46 &&
+    header[3] === 0x46 &&
+    header[8] === 0x57 &&
+    header[9] === 0x45 &&
+    header[10] === 0x42 &&
+    header[11] === 0x50
+  );
 }
 
 function hasExpectedMagicBytes(kind: AssetKind, filename: string, header: Uint8Array): boolean {

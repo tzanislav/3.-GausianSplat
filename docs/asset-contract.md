@@ -40,6 +40,10 @@ Keys are generated server-side and immutable:
 projects/{projectId}/assets/{assetId}/original/{filename}
 projects/{projectId}/assets/{assetId}/runtime/scene.spz
 projects/{projectId}/assets/{assetId}/metadata/processing-report.json
+projects/{projectId}/cover/project-cover.webp
 ```
 
-The client never provides an arbitrary object key. A replacement creates a new asset ID.
+The client never provides an arbitrary object key. A replacement asset creates a new asset ID. The
+project-cover key is the controlled exception: the API alone issues a signed overwrite URL after an owner
+saves the opening camera, and MongoDB stores that key only after the uploaded WebP has passed size,
+checksum and signature validation.

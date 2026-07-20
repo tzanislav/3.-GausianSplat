@@ -105,6 +105,18 @@ Pre-versioned viewer settings migrate to schema version 1; unsupported incoming 
 
 Manual acceptance still needs the configured Firebase/MongoDB/S3 environment: create a project with a ready environment asset, change visibility and reload, save/reopen an opening camera, then repeat a change from two browser tabs and confirm the stale tab is prompted to reload.
 
+## Phase 7 addition: opening-camera project thumbnails
+
+**Save opening camera** now captures the rendered viewer canvas as a WebP and uploads it directly to the
+private S3 bucket through a short-lived, owner-issued URL. The API validates the exact byte length, SHA-256
+checksum and WebP signature before storing only `projects/{projectId}/cover/project-cover.webp` in MongoDB.
+Project list and read responses resolve that key to a five-minute signed download URL, which the dashboard
+uses as the project thumbnail; no permanent asset URL or storage key reaches the browser.
+
+Verified: API lifecycle test plus contracts, database, viewer-core, API and web production builds. Live
+acceptance: save an opening camera in a configured project, return to Projects and confirm its thumbnail is
+shown after a refresh.
+
 Next phase: continue the full scene editor from the persisted first-building foundation.
 
 ## Phase 8: Persisted first-building foundation (historical checkpoint)
@@ -159,7 +171,7 @@ Verified: full workspace formatting and lint, tests, TypeScript type-check and p
 needs a ready environment and GLB to verify gizmo interaction, reload persistence, undo/reset and the proxy
 ground in a browser.
 
-## Phase 10: Anonymous read-only sharing (implementation complete; live acceptance pending)
+## Phase 10: Anonymous read-only sharing (complete)
 
 Implemented a separate `share_links` MongoDB collection with indexes for hashed random bearer tokens, project lookup
 and active-link validation. Owner-only APIs create, list, enable/disable, regenerate and permanently revoke links;
@@ -179,9 +191,8 @@ provider and renders only a presentation viewer: it loads the public manifest, r
 has no editor, owner, upload or mutation controls.
 
 Verified: contract, database, API and web type checks; API tests cover token hashing, anonymous manifest sanitization,
-the public response policy and immediate disablement. Live acceptance still needs a ready private environment/building
-pair in S3: create a share link, open it in an incognito browser, regenerate/revoke it, and confirm the five-minute
-asset-URL window.
+the public response policy and immediate disablement. Live browser/S3 validation is complete, including phone access
+over the local network and the required Firebase Authentication and S3 CORS configuration.
 
 ## Shared sky controls (Phase 10 addition)
 
