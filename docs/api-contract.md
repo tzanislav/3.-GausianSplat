@@ -58,15 +58,16 @@ part upload, so an interrupted upload can resume by reselecting the same file af
 
 ## Phase 10 sharing endpoints
 
-The owner endpoints require a Firebase ID token and never accept a share token. A generated bearer token is returned
-only from creation or regeneration; MongoDB stores a SHA-256 hash, never the token.
+The owner endpoints require a Firebase ID token and never accept a share token. MongoDB stores a SHA-256 hash for
+validation and an AES-256-GCM encrypted copy for authenticated owner retrieval. The raw token is never exposed by a
+public endpoint, manifest, log or analytics event.
 
 | Endpoint                                                     | Purpose                                                                                  |
 | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| `GET /projects/{projectId}/shares`                           | List owner-visible link metadata (never a token or hash).                                |
-| `POST /projects/{projectId}/shares`                          | Create a link with optional expiry and presentation permissions; returns the token once. |
+| `GET /projects/{projectId}/shares`                           | List owner-visible metadata and reusable links (never a token hash).                     |
+| `POST /projects/{projectId}/shares`                          | Create a link with optional expiry and presentation permissions.                          |
 | `PATCH /projects/{projectId}/shares/{shareLinkId}`           | Enable/disable a non-revoked link or update its permissions/expiry.                      |
-| `POST /projects/{projectId}/shares/{shareLinkId}/regenerate` | Replace its token immediately; returns the replacement once.                             |
+| `POST /projects/{projectId}/shares/{shareLinkId}/regenerate` | Replace its token immediately and save the replacement for owner retrieval.              |
 | `DELETE /projects/{projectId}/shares/{shareLinkId}`          | Irreversibly revoke a link.                                                              |
 | `GET /public/shares/{token}/manifest`                        | Validate an enabled, unexpired token and issue a sanitized read-only manifest.           |
 

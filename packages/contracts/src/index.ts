@@ -337,6 +337,8 @@ export const UpdateShareLinkInputSchema = z
 export const ShareLinkSchema = z.object({
   id: z.string().min(1),
   projectId: z.string().min(1),
+  /** Present only in authenticated owner responses. Never include this in a public manifest. */
+  token: z.string().min(1).nullable(),
   enabled: z.boolean(),
   expiresAt: z.string().datetime().nullable(),
   revokedAt: z.string().datetime().nullable(),

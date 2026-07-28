@@ -1145,6 +1145,7 @@ function ShareLinkCard({
   onRevoke: (link: ShareLink) => Promise<void>;
 }) {
   const isRevoked = link.revokedAt !== null;
+  const url = link.token ? shareUrl(link.token) : null;
   return (
     <article className="share-link-card">
       <div>
@@ -1154,6 +1155,26 @@ function ShareLinkCard({
           {link.expiresAt ? ` Â· expires ${formatDate(link.expiresAt)}` : ' Â· no expiry'}
         </p>
       </div>
+      {url ? (
+        <div className="share-link-card__url">
+          <a href={url} target="_blank" rel="noreferrer">
+            <code>{url}</code>
+          </a>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={disabled}
+            onClick={() => void navigator.clipboard.writeText(url)}
+          >
+            Copy link
+          </button>
+        </div>
+      ) : (
+        <p className="panel__hint">
+          This older link was created before reusable links were stored. Regenerate it to save a new
+          address; the old address will stop working.
+        </p>
+      )}
       {!isRevoked ? (
         <>
           <Toggle
@@ -1200,7 +1221,7 @@ function ShareLinkCard({
               disabled={disabled}
               onClick={() => void onRegenerate(link)}
             >
-              Regenerate
+              {url ? 'Regenerate' : 'Generate new link'}
             </button>
             <button
               className="secondary-button"

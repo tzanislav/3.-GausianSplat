@@ -203,6 +203,10 @@ importers:
       mongodb:
         specifier: 'catalog:'
         version: 7.5.0
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.12.2
 
   packages/viewer-core:
     dependencies:

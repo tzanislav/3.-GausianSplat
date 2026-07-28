@@ -114,6 +114,44 @@ curl --fail --silent --show-error http://127.0.0.1:3002/health
 sudo nginx -t
 sudo systemctl reload nginx
 curl --fail --silent --show-error http://127.0.0.1:5173/api/health
+
+current_release=`$(readlink -f "`$root/current")
+current_public_release=`$(readlink -f "`$public_root/current")
+if [ "`$current_release" != "`$release" ] || [ "`$current_public_release" != "`$public_release" ]; then
+  echo "Refusing to remove releases because the active release paths are unexpected." >&2
+  exit 1
+fi
+
+for candidate in "`$root/releases"/*; do
+  [ -d "`$candidate" ] || continue
+  candidate_release=`$(readlink -f "`$candidate")
+  case "`$candidate_release" in
+    "`$root/releases/"*) ;;
+    *)
+      echo "Refusing to remove release outside the configured releases directory: `$candidate_release" >&2
+      exit 1
+      ;;
+  esac
+  [ "`$candidate_release" = "`$release" ] || rm -rf -- "`$candidate_release"
+done
+
+for candidate in "`$public_root/releases"/*; do
+  [ -d "`$candidate" ] || continue
+  candidate_release=`$(readlink -f "`$candidate")
+  case "`$candidate_release" in
+    "`$public_root/releases/"*) ;;
+    *)
+      echo "Refusing to remove public release outside the configured releases directory: `$candidate_release" >&2
+      exit 1
+      ;;
+  esac
+  [ "`$candidate_release" = "`$public_release" ] || sudo rm -rf -- "`$candidate_release"
+done
+
+if ! "`$runtime_corepack" pnpm@11.11.0 store prune --store-dir "`$root/.pnpm-store"; then
+  echo "Warning: unable to prune unused pnpm packages." >&2
+fi
+
 echo "Activated release: `$release_id"
 "@
   } else {

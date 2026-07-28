@@ -4,7 +4,7 @@
 
 Owners authenticate with Firebase. The API verifies the Firebase ID token, maps the Firebase UID to a local user and checks project ownership for every private request.
 
-Anonymous viewers authenticate only through a high-entropy share token presented to the public manifest endpoint. The database stores a one-way hash of that token, not the token itself. Share-token authentication is read-only and is never accepted by mutation endpoints.
+Anonymous viewers authenticate only through a high-entropy share token presented to the public manifest endpoint. The database stores a one-way hash for token validation and an AES-256-GCM encrypted copy so the authenticated project owner can reuse the link. The encryption key is server-only; the encrypted token is never included in public manifests. Share-token authentication is read-only and is never accepted by mutation endpoints.
 
 ## Asset delivery
 

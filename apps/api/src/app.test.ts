@@ -990,6 +990,7 @@ test('anonymous share manifests are token-only, sanitized and immediately respec
       const link: ShareLink & { tokenHash: string } = {
         id: `share-${links.length + 1}`,
         projectId: input.projectId,
+        token: input.token,
         enabled: true,
         expiresAt: input.expiresAt,
         revokedAt: null,
@@ -1030,11 +1031,12 @@ test('anonymous share manifests are token-only, sanitized and immediately respec
       links[index] = updated;
       return updated;
     },
-    async regenerateShareLink(shareLinkId, tokenHash) {
+    async regenerateShareLink(shareLinkId, token, tokenHash) {
       const link = links.find(
         (candidate) => candidate.id === shareLinkId && candidate.revokedAt === null,
       );
       if (!link) return null;
+      link.token = token;
       link.tokenHash = tokenHash;
       link.enabled = true;
       return link;
@@ -1141,7 +1143,14 @@ test('anonymous share manifests are token-only, sanitized and immediately respec
     expect(created.status).toBe(201);
     const createdBody = (await created.json()) as { link: ShareLink; token: string };
     expect(createdBody.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(createdBody.link.token).toBe(createdBody.token);
     expect(links[0]?.tokenHash).toBe(createHash('sha256').update(createdBody.token).digest('hex'));
+
+    const ownerLinks = await fetch(`${shareOrigin}/projects/owner-project/shares`, {
+      headers: { authorization: 'Bearer owner-token' },
+    });
+    expect(ownerLinks.status).toBe(200);
+    await expect(ownerLinks.json()).resolves.toMatchObject([{ token: createdBody.token }]);
 
     const publicManifest = await fetch(
       `${shareOrigin}/public/shares/${createdBody.token}/manifest`,

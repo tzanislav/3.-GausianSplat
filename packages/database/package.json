@@ -15,5 +15,8 @@
   "dependencies": {
     "@gaussian-viewer/contracts": "workspace:*",
     "mongodb": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:"
   }
 }

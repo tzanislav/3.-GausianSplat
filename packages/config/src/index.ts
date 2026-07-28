@@ -20,9 +20,19 @@ const StorageEnvironmentSchema = z.object({
   AWS_SECRET_ACCESS_KEY: z.string().min(1),
 });
 
+const ShareTokenEnvironmentSchema = z.object({
+  SHARE_TOKEN_ENCRYPTION_KEY: z
+    .string()
+    .base64()
+    .refine((value) => Buffer.from(value, 'base64').length === 32, {
+      message: 'SHARE_TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte key.',
+    }),
+});
+
 export type ServerEnvironment = z.infer<typeof ServerEnvironmentSchema>;
 export type AuthenticationEnvironment = z.infer<typeof AuthenticationEnvironmentSchema>;
 export type StorageEnvironment = z.infer<typeof StorageEnvironmentSchema>;
+export type ShareTokenEnvironment = z.infer<typeof ShareTokenEnvironmentSchema>;
 
 export function getServerEnvironment(rawEnvironment: NodeJS.ProcessEnv): ServerEnvironment {
   return ServerEnvironmentSchema.parse({
@@ -54,5 +64,11 @@ export function getStorageEnvironment(rawEnvironment: NodeJS.ProcessEnv): Storag
     AWS_S3_BUCKET: rawEnvironment.AWS_S3_BUCKET,
     AWS_ACCESS_KEY_ID: rawEnvironment.AWS_ACCESS_KEY_ID,
     AWS_SECRET_ACCESS_KEY: rawEnvironment.AWS_SECRET_ACCESS_KEY,
+  });
+}
+
+export function getShareTokenEnvironment(rawEnvironment: NodeJS.ProcessEnv): ShareTokenEnvironment {
+  return ShareTokenEnvironmentSchema.parse({
+    SHARE_TOKEN_ENCRYPTION_KEY: rawEnvironment.SHARE_TOKEN_ENCRYPTION_KEY,
   });
 }

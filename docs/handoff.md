@@ -175,8 +175,9 @@ ground in a browser.
 
 Implemented a separate `share_links` MongoDB collection with indexes for hashed random bearer tokens, project lookup
 and active-link validation. Owner-only APIs create, list, enable/disable, regenerate and permanently revoke links;
-tokens use 32 random bytes encoded as base64url and are returned only on creation/regeneration. MongoDB stores only
-their SHA-256 hashes. Optional expiry and all four documented presentation permissions are persisted.
+tokens use 32 random bytes encoded as base64url. MongoDB stores their SHA-256 hashes for validation and AES-256-GCM
+encrypted copies for authenticated owner retrieval. Optional expiry and all four documented presentation permissions
+are persisted.
 
 `GET /public/shares/{token}/manifest` is deliberately unauthenticated and accepts only a valid enabled, non-revoked,
 unexpired share token. It returns a distinct public contract with the project title, canonical scene presentation data,
@@ -186,9 +187,11 @@ manifest issuance stops immediately; an S3 URL already received remains usable f
 response headers and the web shell set noindex/no-follow/no-referrer protections; the API error path never logs public
 request URLs, which contain bearer tokens.
 
-The owner editor now manages sharing and displays a copy-once generated link. `/share/{token}` is outside the Firebase
-provider and renders only a presentation viewer: it loads the public manifest, restores the saved opening camera and
-has no editor, owner, upload or mutation controls.
+The owner editor now manages sharing and displays each reusable link with open and copy controls. Existing historical
+links that predate encrypted storage cannot be recovered; their owner can regenerate one, which invalidates only that
+old address and saves the replacement. `/share/{token}` is outside the Firebase provider and renders only a
+presentation viewer: it loads the public manifest, restores the saved opening camera and has no editor, owner, upload
+or mutation controls.
 
 Verified: contract, database, API and web type checks; API tests cover token hashing, anonymous manifest sanitization,
 the public response policy and immediate disablement. Live browser/S3 validation is complete, including phone access

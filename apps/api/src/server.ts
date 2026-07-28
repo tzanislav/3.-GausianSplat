@@ -4,6 +4,7 @@ import { checkFirebaseAdminConnection, createFirebaseTokenVerifier } from '@gaus
 import {
   getAuthenticationEnvironment,
   getServerEnvironment,
+  getShareTokenEnvironment,
   getStorageEnvironment,
 } from '@gaussian-viewer/config';
 import { createMongoRepositories } from '@gaussian-viewer/database';
@@ -18,7 +19,11 @@ if (existsSync(localEnvironmentPath)) {
 const environment = getServerEnvironment(process.env);
 const authenticationEnvironment = getAuthenticationEnvironment(process.env);
 const storageEnvironment = getStorageEnvironment(process.env);
-const database = createMongoRepositories(authenticationEnvironment.MONGODB_URI);
+const shareTokenEnvironment = getShareTokenEnvironment(process.env);
+const database = createMongoRepositories(
+  authenticationEnvironment.MONGODB_URI,
+  shareTokenEnvironment.SHARE_TOKEN_ENCRYPTION_KEY,
+);
 const app = createApp({
   tokenVerifier: createFirebaseTokenVerifier(authenticationEnvironment),
   users: database.users,

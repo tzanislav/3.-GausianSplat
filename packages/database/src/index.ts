@@ -22,6 +22,7 @@ import type {
   UploadSessionState,
   ViewerSettings,
 } from '@gaussian-viewer/contracts';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { MongoClient, ObjectId, type Collection } from 'mongodb';
 
 interface MongoUserDocument extends FirebaseUser {
@@ -93,6 +94,7 @@ interface MongoShareLinkDocument {
   projectId: ObjectId;
   ownerFirebaseUid: string;
   tokenHash: string;
+  tokenCiphertext?: string;
   enabled: boolean;
   expiresAt: Date | null;
   revokedAt: Date | null;
@@ -217,6 +219,7 @@ export interface AssetRepository {
 export interface NewShareLink {
   projectId: string;
   ownerFirebaseUid: string;
+  token: string;
   tokenHash: string;
   expiresAt: string | null;
   permissions: SharePermissions;
@@ -228,7 +231,11 @@ export interface ShareLinkRepository {
   getShareLink(shareLinkId: string): Promise<ShareLink | null>;
   getActiveShareLinkByTokenHash(tokenHash: string, now: Date): Promise<ShareLink | null>;
   updateShareLink(shareLinkId: string, input: UpdateShareLinkInput): Promise<ShareLink | null>;
-  regenerateShareLink(shareLinkId: string, tokenHash: string): Promise<ShareLink | null>;
+  regenerateShareLink(
+    shareLinkId: string,
+    token: string,
+    tokenHash: string,
+  ): Promise<ShareLink | null>;
   revokeShareLink(shareLinkId: string): Promise<ShareLink | null>;
 }
 
@@ -244,8 +251,12 @@ export interface DatabaseRepositories {
   close(): Promise<void>;
 }
 
-export function createMongoRepositories(uri: string): DatabaseRepositories {
+export function createMongoRepositories(
+  uri: string,
+  shareTokenEncryptionKey: string,
+): DatabaseRepositories {
   const client = new MongoClient(uri);
+  const tokenEncryptionKey = decodeBase64Key(shareTokenEncryptionKey);
   let collections:
     | Promise<{
         users: Collection<MongoUserDocument>;
@@ -587,6 +598,7 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
           projectId,
           ownerFirebaseUid: input.ownerFirebaseUid,
           tokenHash: input.tokenHash,
+          tokenCiphertext: encryptShareToken(input.token, tokenEncryptionKey),
           enabled: true,
           expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
           revokedAt: null,
@@ -595,21 +607,21 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
           updatedAt: now,
         };
         await shares.insertOne(stored);
-        return toShareLink(stored);
+        return toShareLink(stored, tokenEncryptionKey);
       },
       async listShareLinks(projectId) {
         const objectId = toObjectId(projectId);
         if (!objectId) return [];
         const { shares } = await getCollections();
         const stored = await shares.find({ projectId: objectId }).sort({ createdAt: -1 }).toArray();
-        return stored.map(toShareLink);
+        return stored.map((link) => toShareLink(link, tokenEncryptionKey));
       },
       async getShareLink(shareLinkId) {
         const objectId = toObjectId(shareLinkId);
         if (!objectId) return null;
         const { shares } = await getCollections();
         const stored = await shares.findOne({ _id: objectId });
-        return stored ? toShareLink(stored) : null;
+        return stored ? toShareLink(stored, tokenEncryptionKey) : null;
       },
       async getActiveShareLinkByTokenHash(tokenHash, now) {
         const { shares } = await getCollections();
@@ -640,18 +652,25 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
           { $set: update },
           { returnDocument: 'after' },
         );
-        return stored ? toShareLink(stored) : null;
+        return stored ? toShareLink(stored, tokenEncryptionKey) : null;
       },
-      async regenerateShareLink(shareLinkId, tokenHash) {
+      async regenerateShareLink(shareLinkId, token, tokenHash) {
         const objectId = toObjectId(shareLinkId);
         if (!objectId) return null;
         const { shares } = await getCollections();
         const stored = await shares.findOneAndUpdate(
           { _id: objectId, revokedAt: null },
-          { $set: { tokenHash, enabled: true, updatedAt: new Date() } },
+          {
+            $set: {
+              tokenHash,
+              tokenCiphertext: encryptShareToken(token, tokenEncryptionKey),
+              enabled: true,
+              updatedAt: new Date(),
+            },
+          },
           { returnDocument: 'after' },
         );
-        return stored ? toShareLink(stored) : null;
+        return stored ? toShareLink(stored, tokenEncryptionKey) : null;
       },
       async revokeShareLink(shareLinkId) {
         const objectId = toObjectId(shareLinkId);
@@ -663,7 +682,7 @@ export function createMongoRepositories(uri: string): DatabaseRepositories {
           { $set: { enabled: false, revokedAt: now, updatedAt: now } },
           { returnDocument: 'after' },
         );
-        return stored ? toShareLink(stored) : null;
+        return stored ? toShareLink(stored, tokenEncryptionKey) : null;
       },
     },
     annotationComments: {
@@ -923,10 +942,14 @@ function toUploadSession(document: MongoUploadSessionDocument): UploadSession {
   };
 }
 
-function toShareLink(document: MongoShareLinkDocument): ShareLink {
+function toShareLink(document: MongoShareLinkDocument, tokenEncryptionKey?: Uint8Array): ShareLink {
   return {
     id: document._id.toHexString(),
     projectId: document.projectId.toHexString(),
+    token:
+      tokenEncryptionKey && document.tokenCiphertext
+        ? decryptShareToken(document.tokenCiphertext, tokenEncryptionKey)
+        : null,
     enabled: document.enabled,
     expiresAt: document.expiresAt?.toISOString() ?? null,
     revokedAt: document.revokedAt?.toISOString() ?? null,
@@ -934,4 +957,60 @@ function toShareLink(document: MongoShareLinkDocument): ShareLink {
     createdAt: document.createdAt.toISOString(),
     updatedAt: document.updatedAt.toISOString(),
   };
+}
+
+function encryptShareToken(token: string, encryptionKey: Uint8Array): string {
+  const initializationVector = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', encryptionKey, initializationVector);
+  const ciphertext = cipher.update(token, 'utf8');
+  cipher.final();
+  const authenticationTag = cipher.getAuthTag();
+  return [
+    'v1',
+    initializationVector.toString('base64url'),
+    authenticationTag.toString('base64url'),
+    ciphertext.toString('base64url'),
+  ].join('.');
+}
+
+function decryptShareToken(ciphertext: string, encryptionKey: Uint8Array): string {
+  const [version, initializationVector, authenticationTag, encryptedToken] = ciphertext.split('.');
+  if (version !== 'v1' || !initializationVector || !authenticationTag || !encryptedToken) {
+    throw new Error('Stored share token could not be decrypted.');
+  }
+  const decipher = createDecipheriv(
+    'aes-256-gcm',
+    encryptionKey,
+    decodeBase64Url(initializationVector),
+  );
+  decipher.setAuthTag(decodeBase64Url(authenticationTag));
+  const token = decipher.update(encryptedToken, 'base64url');
+  decipher.final();
+  return token.toString('utf8');
+}
+
+function decodeBase64Key(value: string): Uint8Array {
+  return decodeBase64(value.replace(/=+$/, ''));
+}
+
+function decodeBase64Url(value: string): Uint8Array {
+  return decodeBase64(value.replace(/-/g, '+').replace(/_/g, '/'));
+}
+
+function decodeBase64(value: string): Uint8Array {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const bytes: number[] = [];
+  let accumulator = 0;
+  let bits = 0;
+  for (const character of value) {
+    const index = alphabet.indexOf(character);
+    if (index < 0) throw new Error('Share-token encryption key is invalid.');
+    accumulator = (accumulator << 6) | index;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes.push((accumulator >> bits) & 0xff);
+    }
+  }
+  return Uint8Array.from(bytes);
 }

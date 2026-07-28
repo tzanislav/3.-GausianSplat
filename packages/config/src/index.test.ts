@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import {
   getAuthenticationEnvironment,
   getServerEnvironment,
+  getShareTokenEnvironment,
   getStorageEnvironment,
 } from './index.js';
 
@@ -37,4 +38,13 @@ test('loads the server-only S3 credentials', () => {
       AWS_SECRET_ACCESS_KEY: 'secret-key',
     }),
   ).toMatchObject({ AWS_REGION: 'eu-central-1' });
+});
+
+test('requires a 32-byte share-token encryption key', () => {
+  expect(() => getShareTokenEnvironment({ SHARE_TOKEN_ENCRYPTION_KEY: 'not-a-key' })).toThrow();
+  expect(
+    getShareTokenEnvironment({
+      SHARE_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
+    }),
+  ).toMatchObject({ SHARE_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64') });
 });

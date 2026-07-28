@@ -573,6 +573,7 @@ export function createApp(dependencies: AppDependencies = {}): Express {
         const link = await shares.createShareLink({
           projectId: project.id,
           ownerFirebaseUid: firebaseUser.firebaseUid,
+          token,
           tokenHash: hashShareToken(token),
           expiresAt: input.data.expiresAt ?? null,
           permissions: { ...defaultSharePermissions(), ...input.data.permissions },
@@ -648,7 +649,7 @@ export function createApp(dependencies: AppDependencies = {}): Express {
         );
         if (!existing) return;
         const token = createShareToken();
-        const updated = await shares.regenerateShareLink(existing.id, hashShareToken(token));
+        const updated = await shares.regenerateShareLink(existing.id, token, hashShareToken(token));
         if (!updated) {
           response.status(409).json({ error: 'The share link can no longer be regenerated.' });
           return;

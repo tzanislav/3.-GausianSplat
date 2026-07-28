@@ -186,7 +186,7 @@ Owner clicks Share
         ↓
 API generates a cryptographically random token
         ↓
-Only the token hash is stored in MongoDB
+MongoDB stores a SHA-256 hash for validation and an AES-256-GCM encrypted copy for authenticated owner retrieval
         ↓
 URL: /share/{token}
         ↓
@@ -630,7 +630,7 @@ At this point, the application is a usable **private internal MVP**.
 
 1. Create the `share_links` collection.
 2. Generate a high-entropy random token.
-3. Store only its hash.
+3. Store its hash for validation and an encrypted copy for authenticated owner retrieval.
 4. Add:
 
    * Enable/disable
